@@ -1,0 +1,22 @@
+name: EMS
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - pandas
+  - dask
+  - sqlalchemy
+  - pysqlite3
+  - pg8000
+  - google-api-python-client
+  - google-cloud-sdk
+  - cloud-sql-python-connector
+  - blas[build=mkl]
+  - jupyter
+  - seaborn
+  - pip
+  - pip:
+    - dask-saturn>=0.3.0
+prefix: /Users/awd/opt/anaconda3/envs/EMS
