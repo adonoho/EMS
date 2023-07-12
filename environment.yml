@@ -3,17 +3,15 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
-  - numpy
+  - python=3.10
+  - scipy
+  - cvxpy
   - pandas
   - dask
-  - sqlalchemy
-  - pysqlite3
-  - pg8000
-  - google-api-python-client
-  - google-cloud-sdk
-  - cloud-sql-python-connector
   - blas[build=mkl]
+  - sqlalchemy
+  - pg8000
+  - cloud-sql-python-connector
   - jupyter
   - seaborn
   - pip
