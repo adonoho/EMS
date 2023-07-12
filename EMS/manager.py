@@ -15,7 +15,8 @@ from datetime import datetime, timezone, timedelta
 from math import floor
 from pathlib import Path
 
-import pandas
+import pandas as pd
+from pandas import DataFrame
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import MetaData
@@ -24,7 +25,6 @@ from pg8000.dbapi import Connection
 from google.cloud.sql.connector import connector
 from dask import delayed
 from dask.distributed import Client, as_completed
-from pandas import DataFrame
 
 
 def _now() -> datetime:
@@ -49,7 +49,7 @@ class Databases:
         self.remote = remote
 
     def _push_to_database(self):
-        df = pandas.concat(self.results)
+        df = pd.concat(self.results)
         # Store locally for durability.
         with self.local.connect() as ldb:
             df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
@@ -185,16 +185,19 @@ def unroll_experiment(experiment: dict) -> list:
     return parameters
 
 
+def dedup_experiment(df: DataFrame, params: list) -> list:
+    dedup = []
+    for p in params:
+        test = df.copy()
+        for k, v in p.items():
+            test = test.loc[test[k] == v]
+            if len(test.index) == 0:
+                dedup.append(p)
+                break
+    return dedup
+
+
 def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: Engine = None):
-
-    # Save the experiment domain.
-    record_experiment(experiment)
-
-    # Prepare parameters.
-    parameters = unroll_experiment(experiment)
-    random.shuffle(parameters)
-    instance_count = len(parameters)
-    logging.info(f'Number of Instances to calculate: {instance_count}')
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
@@ -202,6 +205,21 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: 
     db_url = experiment['db_url']
 
     db = Databases(db_url, table_name, remote)
+    try:
+        df = pd.read_sql_table(table_name, db.local, index_col='index')
+    except ValueError:
+        df = None
+    # Save the experiment domain.
+    record_experiment(experiment)
+
+    # Prepare parameters.
+    parameters = unroll_experiment(experiment)
+    if df is not None and len(df.index) > 0:
+        parameters = dedup_experiment(df, parameters)
+    df = None  # Free up the DataFrame.
+    random.shuffle(parameters)
+    instance_count = len(parameters)
+    logging.info(f'Number of Instances to calculate: {instance_count}')
 
     # Start the computation.
     tick = time.perf_counter()
@@ -216,6 +234,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: 
     db.final_push()
     total_time = time.perf_counter() - tick
     logging.info(f"Performed experiment in {total_time:0.4f} seconds")
-    logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
+    if instance_count > 0:
+        logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
     logging.info(f'Starting index: {base_index}, Count: {instance_count}, Next index: {base_index + instance_count}.')
 
