@@ -22,10 +22,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.schema import MetaData
 from sqlalchemy.exc import SQLAlchemyError
 from pg8000.dbapi import Connection
-from google.cloud.sql.connector import connector
+from google.cloud.sql.connector import Connector
+from google.oauth2 import service_account
 from dask import delayed
 from dask.distributed import Client, as_completed
-
+import pandas_gbq as gbq
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -40,13 +41,17 @@ def _touch_db_url(db_url: str):
 
 class Databases:
 
-    def __init__(self, db_url: str, table_name: str, remote: Engine = None):
+    def __init__(self, table_name: str,
+                 remote: Engine = None, credentials: service_account.credentials = None):
         self.results = []
         self.last_save = _now()
         self.table_name = table_name
+        db_url = 'sqlite:///data/EMS.db3'
         _touch_db_url(db_url)
-        self.local = create_engine(db_url, echo=False)
+        self.local = create_engine(db_url, echo=True)
         self.remote = remote
+        self.credentials = credentials
+
 
     def _push_to_database(self):
         df = pd.concat(self.results)
@@ -60,6 +65,11 @@ class Databases:
                     df.to_sql(self.table_name, rdb, if_exists='append', method='multi')
             except SQLAlchemyError as e:
                 logging.error("%s", e)
+        if self.credentials is not None:
+            df.to_gbq(f'EMS.{self.table_name}',
+                      if_exists='append',
+                      progress_bar=False,
+                      credentials=self.credentials)
         self.results = []
 
     def push(self, result: DataFrame):
@@ -81,14 +91,15 @@ class Databases:
 # 'creator' argument to 'create_engine'
 def create_remote_connection_engine() -> Engine:
     def get_conn() -> Connection:
-        conn: Connection = connector.connect(
+        connector = Connector()
+        connection: Connection = connector.connect(
             os.environ["POSTGRES_CONNECTION_NAME"],
             "pg8000",
             user=os.environ["POSTGRES_USER"],
             password=os.environ["POSTGRES_PASS"],
             db=os.environ["POSTGRES_DB"],
         )
-        return conn
+        return connection
 
     engine = create_engine(
         "postgresql+pg8000://",
@@ -110,6 +121,14 @@ def active_remote_engine() -> (Engine, MetaData):
         logging.debug("%s", e)
         remote.dispose()
     return None, None
+
+
+def get_gbq_credentials() -> service_account.Credentials:
+    # path = '~/.config/gcloud/hs-deep-lab-donoho-ad747d94d2ec.json'  # Pandas-GBQ
+    path = '~/.config/gcloud/hs-deep-lab-donoho-3d5cf4ffa2f7.json'  # Pandas-GBQ-DataSource
+    expanded_path = os.path.expanduser(path)
+    credentials = service_account.Credentials.from_service_account_file(expanded_path)
+    return credentials
 
 
 def unroll_parameters(parameters: dict) -> list:
@@ -164,10 +183,14 @@ def remove_stop_list(unrolled: list, stop: list) -> list:
     return result
 
 
+def timestamp() -> int:
+    now = datetime.now(timezone.utc)
+    return floor(now.timestamp())
+
+
 def record_experiment(experiment: dict):
     table_name = experiment['table_name']
-    now = datetime.now(timezone.utc)
-    now_ts = floor(now.timestamp())
+    now_ts = timestamp()
 
     with open(table_name + f'-{now_ts}.json', 'w') as json_file:
         json.dump(experiment, json_file, indent=4)
@@ -197,14 +220,15 @@ def dedup_experiment(df: DataFrame, params: list) -> list:
     return dedup
 
 
-def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: Engine = None):
+def do_on_cluster(experiment: dict, instance: callable, client: Client,
+                  remote: Engine = None, credentials: service_account.credentials = None):
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    base_index = experiment['base_index']
-    db_url = experiment['db_url']
+    # base_index = experiment['base_index']
+    # db_url = experiment['db_url']
 
-    db = Databases(db_url, table_name, remote)
+    db = Databases(table_name, remote, credentials)
     try:
         df = pd.read_sql_table(table_name, db.local, index_col='index')
     except ValueError:
@@ -216,6 +240,9 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: 
     parameters = unroll_experiment(experiment)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
+        base_index = len(df.index)
+    else:
+        base_index = 0
     df = None  # Free up the DataFrame.
     random.shuffle(parameters)
     instance_count = len(parameters)
@@ -223,18 +250,21 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client, remote: 
 
     # Start the computation.
     tick = time.perf_counter()
+    # delayed_instance = delayed(instance)
+    # futures = client.compute([delayed_instance(**p) for p in parameters])
     futures = client.map(lambda p: instance(**p), parameters)  # Properly isolates the instance keywords from `client.map()`.
-    for i, (future, result) in enumerate(as_completed(futures, with_results=True)):
-        result = update_index(i + base_index, result)
-        if not(i % 10):  # Log results every tenth output
-            logging.info(result)
-            logging.info(f"Seconds/Instance: {((time.perf_counter() - tick) / (i + 1)):0.4f}")
-        db.push(result)
-        future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
+    i = base_index
+    for batch in as_completed(futures, with_results=True).batches():
+        for future, result in batch:
+            i += 1
+            if not (i % 10):  # Log results every tenth output
+                logging.info(f"Count: {i}; Seconds/Instance: {((time.perf_counter() - tick) / (i - base_index)):0.4f}")
+                logging.info(result)
+            db.push(result)
+            future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
     db.final_push()
     total_time = time.perf_counter() - tick
     logging.info(f"Performed experiment in {total_time:0.4f} seconds")
     if instance_count > 0:
         logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
     logging.info(f'Starting index: {base_index}, Count: {instance_count}, Next index: {base_index + instance_count}.')
-
