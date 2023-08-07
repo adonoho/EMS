@@ -24,9 +24,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from pg8000.dbapi import Connection
 from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
-# from dask import delayed
+from dask import delayed
 from dask.distributed import Client, as_completed
-# import pandas_gbq as gbq
+import pandas_gbq as gbq
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -46,8 +46,9 @@ class Databases:
         self.results = []
         self.last_save = _now()
         self.table_name = table_name
-        _touch_db_url('sqlite:///data/EMS.db3')
-        self.local = create_engine(db_url, echo=False)
+        db_url = 'sqlite:///data/EMS.db3'
+        _touch_db_url(db_url)
+        self.local = create_engine(db_url, echo=True)
         self.remote = remote
         self.credentials = credentials
 
@@ -64,7 +65,7 @@ class Databases:
                     df.to_sql(self.table_name, rdb, if_exists='append', method='multi')
             except SQLAlchemyError as e:
                 logging.error("%s", e)
-        elif self.credentials is not None:
+        if self.credentials is not None:
             df.to_gbq(f'EMS.{self.table_name}',
                       if_exists='append',
                       progress_bar=False,
@@ -123,7 +124,8 @@ def active_remote_engine() -> (Engine, MetaData):
 
 
 def get_gbq_credentials() -> service_account.Credentials:
-    path = '~/.config/gcloud/hs-deep-lab-donoho-ad747d94d2ec.json'
+    # path = '~/.config/gcloud/hs-deep-lab-donoho-ad747d94d2ec.json'  # Pandas-GBQ
+    path = '~/.config/gcloud/hs-deep-lab-donoho-3d5cf4ffa2f7.json'  # Pandas-GBQ-DataSource
     expanded_path = os.path.expanduser(path)
     credentials = service_account.Credentials.from_service_account_file(expanded_path)
     return credentials
@@ -248,14 +250,18 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
 
     # Start the computation.
     tick = time.perf_counter()
+    # delayed_instance = delayed(instance)
+    # futures = client.compute([delayed_instance(**p) for p in parameters])
     futures = client.map(lambda p: instance(**p), parameters)  # Properly isolates the instance keywords from `client.map()`.
-    for i, (future, result) in enumerate(as_completed(futures, with_results=True)):
-        result = update_index(i + base_index, result)
-        if not(i % 10):  # Log results every tenth output
-            logging.info(result)
-            logging.info(f"Seconds/Instance: {((time.perf_counter() - tick) / (i + 1)):0.4f}")
-        db.push(result)
-        future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
+    i = base_index
+    for batch in as_completed(futures, with_results=True).batches():
+        for future, result in batch:
+            i += 1
+            if not (i % 10):  # Log results every tenth output
+                logging.info(f"Count: {i}; Seconds/Instance: {((time.perf_counter() - tick) / (i - base_index)):0.4f}")
+                logging.info(result)
+            db.push(result)
+            future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
     db.final_push()
     total_time = time.perf_counter() - tick
     logging.info(f"Performed experiment in {total_time:0.4f} seconds")
