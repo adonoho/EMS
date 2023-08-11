@@ -28,6 +28,7 @@ from dask import delayed
 from dask.distributed import Client, as_completed
 import pandas_gbq as gbq
 
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -48,7 +49,7 @@ class Databases:
         self.table_name = table_name
         db_url = 'sqlite:///data/EMS.db3'
         _touch_db_url(db_url)
-        self.local = create_engine(db_url, echo=True)
+        self.local = create_engine(db_url, echo=False)
         self.remote = remote
         self.credentials = credentials
 
@@ -75,7 +76,7 @@ class Databases:
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if len(self.results) > 1023 or (now - self.last_save) > timedelta(seconds=60.0):
+        if len(self.results) > 2047 or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -85,6 +86,7 @@ class Databases:
         self.local.dispose()
         self.local = None
         self.remote = None
+        self.credentials = None
 
 
 # The Cloud SQL Python Connector can be used along with SQLAlchemy using the

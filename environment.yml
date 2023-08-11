@@ -12,9 +12,6 @@ dependencies:
   - sqlalchemy
   - pg8000
   - cloud-sql-python-connector
-  - jupyter
-  - seaborn
   - pip
   - pip:
     - dask-saturn>=0.3.0
-prefix: /Users/awd/opt/anaconda3/envs/EMS
