@@ -26,7 +26,7 @@ from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
 from dask import delayed
 from dask.distributed import Client, as_completed
-import pandas_gbq as gbq
+import pandas_gbq.exceptions
 
 
 def _now() -> datetime:
@@ -64,10 +64,14 @@ class Databases:
             except SQLAlchemyError as e:
                 logging.error("%s", e)
         if self.credentials is not None:
-            df.to_gbq(f'EMS.{self.table_name}',
-                      if_exists='append',
-                      progress_bar=False,
-                      credentials=self.credentials)
+            try:
+                df.to_gbq(f'EMS.{self.table_name}',
+                          if_exists='append',
+                          progress_bar=False,
+                          credentials=self.credentials)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error("%s", e)
+
         # Store locally for durability.
         with self.local.connect() as ldb:
             df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
@@ -102,7 +106,11 @@ class Databases:
         if self.remote is not None:
             pass
         elif self.credentials is not None:
-            df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+            try:
+                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error(f'{e}')
+                df = None
         else:
             try:
                 df = pd.read_sql_table(self.table_name, self.local, index_col='index')
@@ -117,7 +125,11 @@ class Databases:
             if self.remote is not None:
                 pass
             elif self.credentials is not None:
-                df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                try:
+                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                except pandas_gbq.exceptions.GenericGBQException as e:
+                    logging.error(f'{e}')
+                    df = None
             else:
                 try:
                     df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
