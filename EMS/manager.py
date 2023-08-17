@@ -56,9 +56,6 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
-        # Store locally for durability.
-        with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
@@ -71,12 +68,15 @@ class Databases:
                       if_exists='append',
                       progress_bar=False,
                       credentials=self.credentials)
+        # Store locally for durability.
+        with self.local.connect() as ldb:
+            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
         self.results = []
 
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if len(self.results) > 2047 or (now - self.last_save) > timedelta(seconds=60.0):
+        if len(self.results) > 4095 or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -88,6 +88,27 @@ class Databases:
         self.remote = None
         self.credentials = None
 
+    def batch_result(self, result: DataFrame):
+        self.results.append(result)
+
+    def push_batch(self):
+        now = _now()
+        if len(self.results) > 4095 or (now - self.last_save) > timedelta(seconds=60.0):
+            self._push_to_database()
+            self.last_save = now
+
+    def read_table(self) -> DataFrame:
+        df = None
+        if self.remote is not None:
+            pass
+        elif self.credentials is not None:
+            df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+        else:
+            try:
+                df = pd.read_sql_table(self.table_name, self.local, index_col='index')
+            except ValueError:
+                df = None
+        return df
 
 # The Cloud SQL Python Connector can be used along with SQLAlchemy using the
 # 'creator' argument to 'create_engine'
@@ -210,7 +231,7 @@ def unroll_experiment(experiment: dict) -> list:
     return parameters
 
 
-def dedup_experiment(df: DataFrame, params: list) -> list:
+def dedup_experiment_nested_loop(df: DataFrame, params: list) -> list:
     dedup = []
     for p in params:
         test = df.copy()
@@ -222,6 +243,65 @@ def dedup_experiment(df: DataFrame, params: list) -> list:
     return dedup
 
 
+def dedup_experiment_gpt(df: DataFrame, params: list) -> list:
+    dedup = []
+    dup = []
+    for p in params:
+        tdf = pd.DataFrame(p, index=[0])  # Create a temporary DataFrame from the dictionary
+        merged = df.merge(tdf, how='left', indicator=True)
+
+        if (merged['_merge'] == 'left_only').all():
+            dedup.append(p)
+        else:
+            dup.append(p)
+
+    return dedup
+
+
+def dedup_experiment(df: DataFrame, params: list) -> list:
+    dedup = []
+    if len(params) > 0:
+        keys = sorted(params[0].keys())
+        df_values = set(tuple(row) for row in df[keys].to_numpy())
+
+        for p in params:
+            values = tuple(p[k] for k in keys)
+            if values not in df_values:
+                dedup.append(p)
+                df_values.add(values)
+    return dedup
+
+
+def do_test_experiment(experiment: dict, instance: callable, client: Client,
+                  remote: Engine = None, credentials: service_account.credentials = None):
+
+    # Read the DB level parameters.
+    table_name = experiment['table_name']
+    # base_index = experiment['base_index']
+    # db_url = experiment['db_url']
+
+    db = Databases(table_name, remote, credentials)
+    df = db.read_table()
+    # try:
+    #     df = pd.read_sql_table(table_name, db.local, index_col='index')
+    # except ValueError:
+    #     df = None
+    # Save the experiment domain.
+    record_experiment(experiment)
+
+    # Prepare parameters.
+    parameters = unroll_experiment(experiment)
+    if df is not None and len(df.index) > 0:
+        parameters = dedup_experiment(df, parameters)
+        base_index = len(df.index)
+    else:
+        base_index = 0
+    df = None  # Free up the DataFrame.
+    random.shuffle(parameters)
+    instance_count = len(parameters)
+    logging.info(f'Number of Instances to calculate: {instance_count}')
+
+
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   remote: Engine = None, credentials: service_account.credentials = None):
 
@@ -231,10 +311,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     # db_url = experiment['db_url']
 
     db = Databases(table_name, remote, credentials)
-    try:
-        df = pd.read_sql_table(table_name, db.local, index_col='index')
-    except ValueError:
-        df = None
+    df = db.read_table()
     # Save the experiment domain.
     record_experiment(experiment)
 
@@ -262,8 +339,9 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
             if not (i % 10):  # Log results every tenth output
                 logging.info(f"Count: {i}; Seconds/Instance: {((time.perf_counter() - tick) / (i - base_index)):0.4f}")
                 logging.info(result)
-            db.push(result)
+            db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
+        db.push_batch()
     db.final_push()
     total_time = time.perf_counter() - tick
     logging.info(f"Performed experiment in {total_time:0.4f} seconds")
