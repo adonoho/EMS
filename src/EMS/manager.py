@@ -110,6 +110,24 @@ class Databases:
                 df = None
         return df
 
+    def read_params(self, params: list) -> DataFrame:
+        df = None
+        if len(params) > 0:
+            keys = ','.join(sorted(params[0].keys()))
+            if self.remote is not None:
+                pass
+            elif self.credentials is not None:
+                df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+            else:
+                try:
+                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
+                except ValueError:
+                    df = None
+        else:
+            df = self.read_table()
+        return df
+
+
 # The Cloud SQL Python Connector can be used along with SQLAlchemy using the
 # 'creator' argument to 'create_engine'
 def create_remote_connection_engine() -> Engine:
@@ -277,8 +295,6 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    # base_index = experiment['base_index']
-    # db_url = experiment['db_url']
 
     db = Databases(table_name, remote, credentials)
     df = db.read_table()
@@ -291,6 +307,7 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
 
     # Prepare parameters.
     parameters = unroll_experiment(experiment)
+    df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
         base_index = len(df.index)
@@ -307,16 +324,14 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    # base_index = experiment['base_index']
-    # db_url = experiment['db_url']
-
     db = Databases(table_name, remote, credentials)
-    df = db.read_table()
+
     # Save the experiment domain.
     record_experiment(experiment)
 
     # Prepare parameters.
     parameters = unroll_experiment(experiment)
+    df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
         base_index = len(df.index)
@@ -337,7 +352,10 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
         for future, result in batch:
             i += 1
             if not (i % 10):  # Log results every tenth output
-                logging.info(f"Count: {i}; Seconds/Instance: {((time.perf_counter() - tick) / (i - base_index)):0.4f}")
+                tock = time.perf_counter() - tick
+                count = i - base_index
+                s_i = tock / count
+                logging.info(f"Count: {count}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; Remaining: {round((instance_count - count) * s_i)}")
                 logging.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
