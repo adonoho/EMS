@@ -53,7 +53,6 @@ class Databases:
         self.remote = remote
         self.credentials = credentials
 
-
     def _push_to_database(self):
         df = pd.concat(self.results)
         # Store remotely for flexibility.
