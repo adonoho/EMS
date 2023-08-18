@@ -43,7 +43,8 @@ def _touch_db_url(db_url: str):
 class Databases:
 
     def __init__(self, table_name: str,
-                 remote: Engine = None, credentials: service_account.credentials = None):
+                 remote: Engine = None,  # SQLAlchemy based systems
+                 credentials: service_account.credentials = None, project_id: str = None):  # Google Big Query.
         self.results = []
         self.last_save = _now()
         self.table_name = table_name
@@ -52,6 +53,7 @@ class Databases:
         self.local = create_engine(db_url, echo=False)
         self.remote = remote
         self.credentials = credentials
+        self.project_id = project_id
 
     def _push_to_database(self):
         df = pd.concat(self.results)
@@ -68,6 +70,14 @@ class Databases:
                           if_exists='append',
                           progress_bar=False,
                           credentials=self.credentials)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error("%s", e)
+        elif self.project_id is not None:
+            try:
+                df.to_gbq(f'EMS.{self.table_name}',
+                          if_exists='append',
+                          progress_bar=False,
+                          project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logging.error("%s", e)
 
@@ -90,6 +100,7 @@ class Databases:
         self.local = None
         self.remote = None
         self.credentials = None
+        self.project_id = None
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
@@ -110,6 +121,12 @@ class Databases:
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logging.error(f'{e}')
                 df = None
+        elif self.project_id is not None:
+            try:
+                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error(f'{e}')
+                df = None
         else:
             try:
                 df = pd.read_sql_table(self.table_name, self.local, index_col='index')
@@ -126,6 +143,12 @@ class Databases:
             elif self.credentials is not None:
                 try:
                     df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                except pandas_gbq.exceptions.GenericGBQException as e:
+                    logging.error(f'{e}')
+                    df = None
+            elif self.project_id is not None:
+                try:
+                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logging.error(f'{e}')
                     df = None
