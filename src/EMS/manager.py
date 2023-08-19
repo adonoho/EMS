@@ -325,17 +325,13 @@ def dedup_experiment(df: DataFrame, params: list) -> list:
 
 
 def do_test_experiment(experiment: dict, instance: callable, client: Client,
-                  remote: Engine = None, credentials: service_account.credentials = None):
+                       remote: Engine = None,
+                       credentials: service_account.credentials = None, project_id: str = None):
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
+    db = Databases(table_name, remote, credentials, project_id)
 
-    db = Databases(table_name, remote, credentials)
-    df = db.read_table()
-    # try:
-    #     df = pd.read_sql_table(table_name, db.local, index_col='index')
-    # except ValueError:
-    #     df = None
     # Save the experiment domain.
     record_experiment(experiment)
 
@@ -354,11 +350,12 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
 
 
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
-                  remote: Engine = None, credentials: service_account.credentials = None):
+                  remote: Engine = None,
+                  credentials: service_account.credentials = None, project_id: str = None):
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    db = Databases(table_name, remote, credentials)
+    db = Databases(table_name, remote, credentials, project_id)
 
     # Save the experiment domain.
     record_experiment(experiment)
