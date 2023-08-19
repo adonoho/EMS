@@ -1,2 +1,4 @@
-# EMS_skeleton
- The Experiment Management System skeleton project.
+# EMS: Experiment Management System
+The Experiment Management System package project.
+
+Created for the Stanford Donoho Lab

@@ -26,7 +26,7 @@ from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
 from dask import delayed
 from dask.distributed import Client, as_completed
-import pandas_gbq as gbq
+import pandas_gbq.exceptions
 
 
 def _now() -> datetime:
@@ -43,7 +43,8 @@ def _touch_db_url(db_url: str):
 class Databases:
 
     def __init__(self, table_name: str,
-                 remote: Engine = None, credentials: service_account.credentials = None):
+                 remote: Engine = None,  # SQLAlchemy based systems
+                 credentials: service_account.credentials = None, project_id: str = None):  # Google Big Query.
         self.results = []
         self.last_save = _now()
         self.table_name = table_name
@@ -52,7 +53,7 @@ class Databases:
         self.local = create_engine(db_url, echo=False)
         self.remote = remote
         self.credentials = credentials
-
+        self.project_id = project_id
 
     def _push_to_database(self):
         df = pd.concat(self.results)
@@ -64,10 +65,22 @@ class Databases:
             except SQLAlchemyError as e:
                 logging.error("%s", e)
         if self.credentials is not None:
-            df.to_gbq(f'EMS.{self.table_name}',
-                      if_exists='append',
-                      progress_bar=False,
-                      credentials=self.credentials)
+            try:
+                df.to_gbq(f'EMS.{self.table_name}',
+                          if_exists='append',
+                          progress_bar=False,
+                          credentials=self.credentials)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error("%s", e)
+        elif self.project_id is not None:
+            try:
+                df.to_gbq(f'EMS.{self.table_name}',
+                          if_exists='append',
+                          progress_bar=False,
+                          project_id=self.project_id)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error("%s", e)
+
         # Store locally for durability.
         with self.local.connect() as ldb:
             df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
@@ -87,6 +100,7 @@ class Databases:
         self.local = None
         self.remote = None
         self.credentials = None
+        self.project_id = None
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
@@ -102,13 +116,51 @@ class Databases:
         if self.remote is not None:
             pass
         elif self.credentials is not None:
-            df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+            try:
+                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error(f'{e}')
+                df = None
+        elif self.project_id is not None:
+            try:
+                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
+            except pandas_gbq.exceptions.GenericGBQException as e:
+                logging.error(f'{e}')
+                df = None
         else:
             try:
                 df = pd.read_sql_table(self.table_name, self.local, index_col='index')
             except ValueError:
                 df = None
         return df
+
+    def read_params(self, params: list) -> DataFrame:
+        df = None
+        if len(params) > 0:
+            keys = ','.join(sorted(params[0].keys()))
+            if self.remote is not None:
+                pass
+            elif self.credentials is not None:
+                try:
+                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                except pandas_gbq.exceptions.GenericGBQException as e:
+                    logging.error(f'{e}')
+                    df = None
+            elif self.project_id is not None:
+                try:
+                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                except pandas_gbq.exceptions.GenericGBQException as e:
+                    logging.error(f'{e}')
+                    df = None
+            else:
+                try:
+                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
+                except ValueError:
+                    df = None
+        else:
+            df = self.read_table()
+        return df
+
 
 # The Cloud SQL Python Connector can be used along with SQLAlchemy using the
 # 'creator' argument to 'create_engine'
@@ -273,24 +325,19 @@ def dedup_experiment(df: DataFrame, params: list) -> list:
 
 
 def do_test_experiment(experiment: dict, instance: callable, client: Client,
-                  remote: Engine = None, credentials: service_account.credentials = None):
+                       remote: Engine = None,
+                       credentials: service_account.credentials = None, project_id: str = None):
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    # base_index = experiment['base_index']
-    # db_url = experiment['db_url']
+    db = Databases(table_name, remote, credentials, project_id)
 
-    db = Databases(table_name, remote, credentials)
-    df = db.read_table()
-    # try:
-    #     df = pd.read_sql_table(table_name, db.local, index_col='index')
-    # except ValueError:
-    #     df = None
     # Save the experiment domain.
     record_experiment(experiment)
 
     # Prepare parameters.
     parameters = unroll_experiment(experiment)
+    df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
         base_index = len(df.index)
@@ -303,20 +350,19 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
 
 
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
-                  remote: Engine = None, credentials: service_account.credentials = None):
+                  remote: Engine = None,
+                  credentials: service_account.credentials = None, project_id: str = None):
 
     # Read the DB level parameters.
     table_name = experiment['table_name']
-    # base_index = experiment['base_index']
-    # db_url = experiment['db_url']
+    db = Databases(table_name, remote, credentials, project_id)
 
-    db = Databases(table_name, remote, credentials)
-    df = db.read_table()
     # Save the experiment domain.
     record_experiment(experiment)
 
     # Prepare parameters.
     parameters = unroll_experiment(experiment)
+    df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
         base_index = len(df.index)
@@ -337,7 +383,10 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
         for future, result in batch:
             i += 1
             if not (i % 10):  # Log results every tenth output
-                logging.info(f"Count: {i}; Seconds/Instance: {((time.perf_counter() - tick) / (i - base_index)):0.4f}")
+                tock = time.perf_counter() - tick
+                count = i - base_index
+                s_i = tock / count
+                logging.info(f"Count: {count}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; Remaining: {round((instance_count - count) * s_i)}")
                 logging.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
