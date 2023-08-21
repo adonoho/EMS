@@ -13,9 +13,11 @@ authors = [
 ]
 requires-python = ">=3.8"
 dependencies = [
+    "icu",
+    "cairo",
     "pandas",
     "google-auth",
-    "pandas-gbq >= 0.19.2",
+    "pandas-gbq >=0.19.2",
     "sqlalchemy",
     "cloud-sql-python-connector",
     "dask"
