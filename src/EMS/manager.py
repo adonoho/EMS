@@ -98,6 +98,8 @@ class Databases:
             self._push_to_database()
         self.local.dispose()
         self.local = None
+        if self.remote is not None:
+            self.remote.dispose()
         self.remote = None
         self.credentials = None
         self.project_id = None
