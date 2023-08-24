@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from math import floor
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from pandas import DataFrame
 from sqlalchemy import create_engine
@@ -235,6 +236,31 @@ def unroll_parameters(parameters: dict) -> list:
     return unrolled
 
 
+def unroll_parameters_gpt(parameters: dict) -> list:
+    """
+    parameters = {
+        'm': [50],
+        'n': [1275, 2550, 3825],
+        'mc': list(range(50)),
+        'c4': np.linspace(0.25, 2.5, 10),
+        'p': np.linspace(0.02, 0.10, 9),
+        'q_type': [21],
+        'd_type': [3]
+        }
+    """
+    unrolled = []
+    import itertools
+
+    # Get all possible combinations of values from the lists
+    combinations = list(itertools.product(*parameters.values()))
+
+    # Create dictionaries with keys and one combination of values
+    for combo in combinations:
+        combined = {key: value for key, value in zip(parameters.keys(), combo)}
+        unrolled.append(combined)
+    return unrolled
+
+
 def update_index(index: int, df: DataFrame) -> DataFrame:
     as_list = df.index.tolist()
     for i in range(len(as_list)):
@@ -284,11 +310,14 @@ def record_experiment(experiment: dict):
 
 def unroll_experiment(experiment: dict) -> list:
     parameters = []
-    if multi_res := experiment.get('multi_res', None):
-        for params in multi_res:
-            parameters.extend(unroll_parameters(params))
-    else:
-        parameters = unroll_parameters(experiment['parameters'])
+    if params := experiment.get('params', None):
+        for p in params:
+            parameters.extend(unroll_parameters_gpt(p))
+    elif multi_res := experiment.get('multi_res', None):
+        for p in multi_res:
+            parameters.extend(unroll_parameters_gpt(p))
+    elif params := experiment.get('parameters', None):
+        parameters = unroll_parameters_gpt(params)
     if stop_list := experiment.get('stop_list', None):
         parameters = remove_stop_list(parameters, stop_list)
     return parameters
@@ -408,3 +437,16 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     if instance_count > 0:
         logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
     logging.info(f'Starting index: {base_index}, Count: {instance_count}, Next index: {base_index + instance_count}.')
+
+if __name__ == '__main__':
+    d = {
+        'm': [50],
+        'n': [1275, 2550, 3825],
+        'mc': list(range(50)),
+        'c4': np.linspace(0.25, 2.5, 10),
+        'p': np.linspace(0.02, 0.10, 9),
+        'q_type': [21],
+        'd_type': [3]
+        }
+    p = unroll_parameters_gpt(d)
+    print(p)
