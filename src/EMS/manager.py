@@ -265,12 +265,20 @@ def timestamp() -> int:
     return floor(now.timestamp())
 
 
+def write_json(d: dict, fn: str):
+    with open(fn, 'w') as json_file:
+        json.dump(d, json_file, indent=4)
+
+
+def read_json(fn: str) -> dict:
+    with open(fn, 'r') as json_file:
+        json.load(json_file)
+
+
 def record_experiment(experiment: dict):
     table_name = experiment['table_name']
     now_ts = timestamp()
-
-    with open(table_name + f'-{now_ts}.json', 'w') as json_file:
-        json.dump(experiment, json_file, indent=4)
+    write_json(experiment, table_name + f'-{now_ts}.json')
 
 
 def unroll_experiment(experiment: dict) -> list:
