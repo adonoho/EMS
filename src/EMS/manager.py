@@ -272,7 +272,8 @@ def write_json(d: dict, fn: str):
 
 def read_json(fn: str) -> dict:
     with open(fn, 'r') as json_file:
-        json.load(json_file)
+        d = json.load(json_file)
+    return d
 
 
 def record_experiment(experiment: dict):
