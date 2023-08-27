@@ -21,7 +21,7 @@ from pandas import DataFrame
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.schema import MetaData
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from pg8000.dbapi import Connection
 from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
@@ -158,7 +158,8 @@ class Databases:
             else:
                 try:
                     df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
-                except ValueError:
+                except (ValueError, OperationalError) as e:
+                    logging.error(f'{e}')
                     df = None
         else:
             df = self.read_table()
@@ -321,33 +322,6 @@ def unroll_experiment(experiment: dict) -> list:
     if stop_list := experiment.get('stop_list', None):
         parameters = remove_stop_list(parameters, stop_list)
     return parameters
-
-
-def dedup_experiment_nested_loop(df: DataFrame, params: list) -> list:
-    dedup = []
-    for p in params:
-        test = df.copy()
-        for k, v in p.items():
-            test = test.loc[test[k] == v]
-            if len(test.index) == 0:
-                dedup.append(p)
-                break
-    return dedup
-
-
-def dedup_experiment_gpt(df: DataFrame, params: list) -> list:
-    dedup = []
-    dup = []
-    for p in params:
-        tdf = pd.DataFrame(p, index=[0])  # Create a temporary DataFrame from the dictionary
-        merged = df.merge(tdf, how='left', indicator=True)
-
-        if (merged['_merge'] == 'left_only').all():
-            dedup.append(p)
-        else:
-            dup.append(p)
-
-    return dedup
 
 
 def dedup_experiment(df: DataFrame, params: list) -> list:
