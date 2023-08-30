@@ -367,6 +367,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   remote: Engine = None,
                   credentials: service_account.credentials = None, project_id: str = None):
 
+    logging.info(f'{client}')
     # Read the DB level parameters.
     table_name = experiment['table_name']
     db = Databases(table_name, remote, credentials, project_id)
@@ -406,11 +407,13 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
         db.push_batch()
     db.final_push()
+    client.shutdown()
     total_time = time.perf_counter() - tick
     logging.info(f"Performed experiment in {total_time:0.4f} seconds")
     if instance_count > 0:
         logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
     logging.info(f'Starting index: {base_index}, Count: {instance_count}, Next index: {base_index + instance_count}.')
+
 
 if __name__ == '__main__':
     d = {
