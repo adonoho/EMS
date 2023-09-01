@@ -29,6 +29,8 @@ from dask import delayed
 from dask.distributed import Client, as_completed
 import pandas_gbq.exceptions
 
+BATCH_SIZE = 4096
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -90,7 +92,7 @@ class Databases:
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if len(self.results) > 4095 or (now - self.last_save) > timedelta(seconds=60.0):
+        if len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -110,7 +112,7 @@ class Databases:
 
     def push_batch(self):
         now = _now()
-        if len(self.results) > 4095 or (now - self.last_save) > timedelta(seconds=60.0):
+        if len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -392,7 +394,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     tick = time.perf_counter()
     # delayed_instance = delayed(instance)
     # futures = client.compute([delayed_instance(**p) for p in parameters])
-    futures = client.map(lambda p: instance(**p), parameters)  # Properly isolates the instance keywords from `client.map()`.
+    futures = client.map(lambda p: instance(**p), parameters, batch_size=BATCH_SIZE)
     i = base_index
     for batch in as_completed(futures, with_results=True).batches():
         for future, result in batch:
@@ -400,8 +402,10 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
             if not (i % 10):  # Log results every tenth output
                 tock = time.perf_counter() - tick
                 count = i - base_index
+                remaining_count = instance_count - count
                 s_i = tock / count
-                logging.info(f"Count: {count}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; Remaining: {round((instance_count - count) * s_i)}")
+                logging.info(f'Count: {count}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
+                             f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
                 logging.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
