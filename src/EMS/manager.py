@@ -37,10 +37,11 @@ def _now() -> datetime:
 
 
 def _touch_db_url(db_url: str):
-    # TODO: Create any intermediate directories.
     db_path = db_url.split('sqlite:///')
     if db_path[0] != db_url:  # If the string was found …
-        Path(db_path[1]).touch()
+        p = Path(db_path[1])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch(exist_ok=True)
 
 
 class Databases:
@@ -290,8 +291,7 @@ def remove_stop_list(unrolled: list, stop: list) -> list:
 
 
 def timestamp() -> int:
-    now = datetime.now(timezone.utc)
-    return floor(now.timestamp())
+    return floor(_now().timestamp())
 
 
 def write_json(d: dict, fn: str):
@@ -420,14 +420,16 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
 
 
 if __name__ == '__main__':
-    d = {
-        'm': [50],
-        'n': [1275, 2550, 3825],
-        'mc': list(range(50)),
-        'c4': np.linspace(0.25, 2.5, 10),
-        'p': np.linspace(0.02, 0.10, 9),
-        'q_type': [21],
-        'd_type': [3]
-        }
-    p = unroll_parameters_gpt(d)
-    print(p)
+    db_url = 'sqlite:///data/EMS.db3'
+    _touch_db_url(db_url)
+    # d = {
+    #     'm': [50],
+    #     'n': [1275, 2550, 3825],
+    #     'mc': list(range(50)),
+    #     'c4': np.linspace(0.25, 2.5, 10),
+    #     'p': np.linspace(0.02, 0.10, 9),
+    #     'q_type': [21],
+    #     'd_type': [3]
+    #     }
+    # p = unroll_parameters_gpt(d)
+    # print(p)
