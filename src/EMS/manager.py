@@ -61,6 +61,9 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
+        # Store locally for durability.
+        with self.local.connect() as ldb:
+            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
@@ -84,10 +87,6 @@ class Databases:
                           project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logging.error("%s", e)
-
-        # Store locally for durability.
-        with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
         self.results = []
 
     def push(self, result: DataFrame):
@@ -365,6 +364,33 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
     logging.info(f'Number of Instances to calculate: {instance_count}')
 
 
+def do_experiment(instance: callable, parameters: list, db: Databases, client: Client):
+    instance_count = len(parameters)
+    i = 0
+    logging.info(f'Number of Instances to calculate: {instance_count}')
+    # Start the computation.
+    tick = time.perf_counter()
+    futures = client.map(lambda p: instance(**p), parameters, batch_size=BATCH_SIZE)
+    for batch in as_completed(futures, with_results=True).batches():
+        for future, result in batch:
+            i += 1
+            if not (i % 10):  # Log results every tenth output
+                tock = time.perf_counter() - tick
+                remaining_count = instance_count - i
+                s_i = tock / i
+                logging.info(f'Count: {i}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
+                             f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
+                logging.info(result)
+            db.batch_result(result)
+            future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
+        db.push_batch()
+    db.final_push()
+    total_time = time.perf_counter() - tick
+    logging.info(f"Performed experiment in {total_time:0.4f} seconds")
+    if instance_count > 0:
+        logging.info(f"Count: {instance_count}, Seconds/Instance: {(total_time / instance_count):0.4f}")
+
+
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   remote: Engine = None,
                   credentials: service_account.credentials = None, project_id: str = None):
@@ -382,41 +408,11 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
-        base_index = len(df.index)
-    else:
-        base_index = 0
     df = None  # Free up the DataFrame.
-    random.shuffle(parameters)
-    instance_count = len(parameters)
-    logging.info(f'Number of Instances to calculate: {instance_count}')
-
-    # Start the computation.
-    tick = time.perf_counter()
-    # delayed_instance = delayed(instance)
-    # futures = client.compute([delayed_instance(**p) for p in parameters])
-    futures = client.map(lambda p: instance(**p), parameters, batch_size=BATCH_SIZE)
-    i = base_index
-    for batch in as_completed(futures, with_results=True).batches():
-        for future, result in batch:
-            i += 1
-            if not (i % 10):  # Log results every tenth output
-                tock = time.perf_counter() - tick
-                count = i - base_index
-                remaining_count = instance_count - count
-                s_i = tock / count
-                logging.info(f'Count: {count}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
-                             f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
-                logging.info(result)
-            db.batch_result(result)
-            future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
-        db.push_batch()
-    db.final_push()
+    if len(parameters) > 0:
+        random.shuffle(parameters)
+        do_experiment(instance, parameters, db, client)
     client.shutdown()
-    total_time = time.perf_counter() - tick
-    logging.info(f"Performed experiment in {total_time:0.4f} seconds")
-    if instance_count > 0:
-        logging.info(f"Seconds/Instance: {(total_time / instance_count):0.4f}")
-    logging.info(f'Starting index: {base_index}, Count: {instance_count}, Next index: {base_index + instance_count}.')
 
 
 if __name__ == '__main__':
