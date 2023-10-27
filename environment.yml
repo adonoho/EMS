@@ -5,8 +5,9 @@ dependencies:
   - blas[build=mkl]
   - python=3.10
   - pandas
+  - cvxpy
   - google-auth
-  - pandas-gbq
+  - pandas-gbq>=0.19.2
   - dask
   - coiled
   - sqlalchemy
