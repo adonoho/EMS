@@ -61,6 +61,8 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
+        self.results = []
+        logging.info(df)
         # Store locally for durability.
         with self.local.connect() as ldb:
             df.to_sql(self.table_name, ldb, if_exists='append', method='multi', index=False)
@@ -87,7 +89,7 @@ class Databases:
                           project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logging.error("%s", e)
-        self.results = []
+        df = None
 
     def push(self, result: DataFrame):
         now = _now()
