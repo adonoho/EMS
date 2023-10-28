@@ -92,6 +92,7 @@ class Databases:
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
+        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
                 or sum(len(df) for df in self.results) >= BATCH_SIZE):
             self._push_to_database()
@@ -110,10 +111,13 @@ class Databases:
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
+        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
 
     def push_batch(self):
         now = _now()
-        if len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
+                or sum(len(df) for df in self.results) >= BATCH_SIZE):
             self._push_to_database()
             self.last_save = now
 
