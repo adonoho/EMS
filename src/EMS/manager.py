@@ -138,7 +138,7 @@ class Databases:
                 df = None
         else:
             try:
-                df = pd.read_sql_table(self.table_name, self.local, index_col='index')
+                df = pd.read_sql_table(self.table_name, self.local)
             except ValueError:
                 df = None
         return df
@@ -163,7 +163,7 @@ class Databases:
                     df = None
             else:
                 try:
-                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
+                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local)
                 except (ValueError, OperationalError) as e:
                     logging.error(f'{e}')
                     df = None
