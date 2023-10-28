@@ -109,16 +109,18 @@ class Databases:
         self.credentials = None
         self.project_id = None
 
-    def batch_result(self, result: DataFrame):
-        self.results.append(result)
-        logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-
     def push_batch(self):
         now = _now()
         logging.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
+
+    def batch_result(self, result: DataFrame):
+        self.results.append(result)
+        logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if sum(len(df) for df in self.results) >= 2 * BATCH_SIZE:  # If the batch write is already large, push it.
+            self.push_batch()
 
     def read_table(self) -> DataFrame:
         df = None
