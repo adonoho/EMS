@@ -54,7 +54,7 @@ class Databases:
         self.table_name = table_name
         db_url = 'sqlite:///data/EMS.db3'
         _touch_db_url(db_url)
-        self.local = create_engine(db_url, echo=True)
+        self.local = create_engine(db_url, echo=False)
         self.remote = remote
         self.credentials = credentials
         self.project_id = project_id
@@ -63,7 +63,7 @@ class Databases:
         df = pd.concat(self.results)
         # Store locally for durability.
         with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
+            df.to_sql(self.table_name, ldb, if_exists='append', method='multi', index=False)
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
