@@ -54,7 +54,7 @@ class Databases:
         self.table_name = table_name
         db_url = 'sqlite:///data/EMS.db3'
         _touch_db_url(db_url)
-        self.local = create_engine(db_url, echo=False)
+        self.local = create_engine(db_url, echo=True)
         self.remote = remote
         self.credentials = credentials
         self.project_id = project_id
@@ -92,9 +92,7 @@ class Databases:
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
-                or sum(len(df) for df in self.results) >= BATCH_SIZE):
+        if sum(len(result) for result in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -111,13 +109,12 @@ class Databases:
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
 
     def push_batch(self):
         now = _now()
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
-                or sum(len(df) for df in self.results) >= BATCH_SIZE):
+        logging.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if sum(len(result) for result in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
