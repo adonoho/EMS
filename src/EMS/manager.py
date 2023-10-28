@@ -61,8 +61,8 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
+        logging.info(f'_push_to_database(): Length: {len(self.results)}\n{df}')
         self.results = []
-        logging.info(df)
         # Store locally for durability.
         with self.local.connect() as ldb:
             df.to_sql(self.table_name, ldb, if_exists='append', method='multi', index=False)
@@ -94,7 +94,7 @@ class Databases:
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if sum(len(result) for result in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -116,7 +116,7 @@ class Databases:
     def push_batch(self):
         now = _now()
         logging.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if sum(len(result) for result in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
