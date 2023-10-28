@@ -119,7 +119,7 @@ class Databases:
     def batch_result(self, result: DataFrame):
         self.results.append(result)
         logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if sum(len(df) for df in self.results) >= 4 * BATCH_SIZE:  # If the batch write is already large, push it.
+        if sum(len(df) for df in self.results) >= 8 * BATCH_SIZE:  # If the batch write is already large, push it.
             self.push_batch()
 
     def read_table(self) -> DataFrame:
