@@ -15,4 +15,4 @@ dependencies:
   - cloud-sql-python-connector
   - pip
   - pip:
-    - git+https://github.com/adonoho/EMS.git@multi-row-DataFrames
+    - git+https://github.com/adonoho/EMS.git
