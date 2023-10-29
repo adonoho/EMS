@@ -61,9 +61,11 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
+        logging.info(f'_push_to_database(): Length: {len(self.results)}\n{df}')
+        self.results = []
         # Store locally for durability.
         with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
+            df.to_sql(self.table_name, ldb, if_exists='append', method='multi', index=False)
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
@@ -87,14 +89,12 @@ class Databases:
                           project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logging.error("%s", e)
-        self.results = []
+        df = None
 
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
-                or sum(len(df) for df in self.results) >= BATCH_SIZE):
+        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -109,17 +109,18 @@ class Databases:
         self.credentials = None
         self.project_id = None
 
-    def batch_result(self, result: DataFrame):
-        self.results.append(result)
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-
     def push_batch(self):
         now = _now()
-        logging.info(f'Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
-        if (len(self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0)
-                or sum(len(df) for df in self.results) >= BATCH_SIZE):
+        logging.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
+
+    def batch_result(self, result: DataFrame):
+        self.results.append(result)
+        logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if sum(len(df) for df in self.results) >= 8 * BATCH_SIZE:  # If the batch write is already large, push it.
+            self.push_batch()
 
     def read_table(self) -> DataFrame:
         df = None
@@ -139,7 +140,7 @@ class Databases:
                 df = None
         else:
             try:
-                df = pd.read_sql_table(self.table_name, self.local, index_col='index')
+                df = pd.read_sql_table(self.table_name, self.local)
             except ValueError:
                 df = None
         return df
@@ -164,7 +165,7 @@ class Databases:
                     df = None
             else:
                 try:
-                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local, index_col='index')
+                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local)
                 except (ValueError, OperationalError) as e:
                     logging.error(f'{e}')
                     df = None
