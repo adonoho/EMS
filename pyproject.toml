@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "EMS"
-version = "0.0.10"
+version = "0.0.11"
 authors = [
     {name = "Andrew W. Donoho", email = "github@store.ddg.com"}
 ]

@@ -210,9 +210,8 @@ def active_remote_engine() -> (Engine, MetaData):
     return None, None
 
 
-def get_gbq_credentials() -> service_account.Credentials:
-    # path = '~/.config/gcloud/hs-deep-lab-donoho-ad747d94d2ec.json'  # Pandas-GBQ
-    path = '~/.config/gcloud/hs-deep-lab-donoho-3d5cf4ffa2f7.json'  # Pandas-GBQ-DataSource
+def get_gbq_credentials(cred_name: str = 'hs-deep-lab-donoho-3d5cf4ffa2f7.json') -> service_account.Credentials:
+    path = f'~/.config/gcloud/{cred_name}'  # Pandas-GBQ-DataSource
     expanded_path = os.path.expanduser(path)
     credentials = service_account.Credentials.from_service_account_file(expanded_path)
     return credentials
