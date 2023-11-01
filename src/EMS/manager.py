@@ -30,7 +30,8 @@ from dask.distributed import Client, as_completed
 import pandas_gbq.exceptions
 
 BATCH_SIZE = 4096
-logger = logging.basicConfig('EMS', level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
