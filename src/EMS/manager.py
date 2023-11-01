@@ -30,7 +30,7 @@ from dask.distributed import Client, as_completed
 import pandas_gbq.exceptions
 
 BATCH_SIZE = 4096
-
+logger = logging.basicConfig('EMS', level=logging.INFO)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -61,7 +61,7 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
-        logging.info(f'_push_to_database(): Length: {len(self.results)}\n{df}')
+        logger.info(f'_push_to_database(): Length: {len(self.results)}\n{df}')
         self.results = []
         # Store locally for durability.
         with self.local.connect() as ldb:
@@ -72,7 +72,7 @@ class Databases:
                 with self.remote.connect() as rdb:
                     df.to_sql(self.table_name, rdb, if_exists='append', method='multi')
             except SQLAlchemyError as e:
-                logging.error("%s", e)
+                logger.error("%s", e)
         if self.credentials is not None:
             try:
                 df.to_gbq(f'EMS.{self.table_name}',
@@ -80,7 +80,7 @@ class Databases:
                           progress_bar=False,
                           credentials=self.credentials)
             except pandas_gbq.exceptions.GenericGBQException as e:
-                logging.error("%s", e)
+                logger.error("%s", e)
         elif self.project_id is not None:
             try:
                 df.to_gbq(f'EMS.{self.table_name}',
@@ -88,7 +88,7 @@ class Databases:
                           progress_bar=False,
                           project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
-                logging.error("%s", e)
+                logger.error("%s", e)
         df = None
 
     def push(self, result: DataFrame):
@@ -111,14 +111,14 @@ class Databases:
 
     def push_batch(self):
         now = _now()
-        logging.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        logger.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        logging.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
+        logger.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if sum(len(df) for df in self.results) >= 8 * BATCH_SIZE:  # If the batch write is already large, push it.
             self.push_batch()
 
@@ -130,13 +130,13 @@ class Databases:
             try:
                 df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
             except pandas_gbq.exceptions.GenericGBQException as e:
-                logging.error(f'{e}')
+                logger.error(f'{e}')
                 df = None
         elif self.project_id is not None:
             try:
                 df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
-                logging.error(f'{e}')
+                logger.error(f'{e}')
                 df = None
         else:
             try:
@@ -155,19 +155,19 @@ class Databases:
                 try:
                     df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
                 except pandas_gbq.exceptions.GenericGBQException as e:
-                    logging.error(f'{e}')
+                    logger.error(f'{e}')
                     df = None
             elif self.project_id is not None:
                 try:
                     df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
                 except pandas_gbq.exceptions.GenericGBQException as e:
-                    logging.error(f'{e}')
+                    logger.error(f'{e}')
                     df = None
             else:
                 try:
                     df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local)
                 except (ValueError, OperationalError) as e:
-                    logging.error(f'{e}')
+                    logger.error(f'{e}')
                     df = None
         else:
             df = self.read_table()
@@ -205,7 +205,7 @@ def active_remote_engine() -> (Engine, MetaData):
         metadata.reflect(remote)  # Causes a DB query.
         return remote, metadata
     except SQLAlchemyError as e:
-        logging.debug("%s", e)
+        logger.debug("%s", e)
         remote.dispose()
     return None, None
 
@@ -366,13 +366,13 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
     df = None  # Free up the DataFrame.
     random.shuffle(parameters)
     instance_count = len(parameters)
-    logging.info(f'Number of Instances to calculate: {instance_count}')
+    logger.info(f'Number of Instances to calculate: {instance_count}')
 
 
 def do_experiment(instance: callable, parameters: list, db: Databases, client: Client):
     instance_count = len(parameters)
     i = 0
-    logging.info(f'Number of Instances to calculate: {instance_count}')
+    logger.info(f'Number of Instances to calculate: {instance_count}')
     # Start the computation.
     tick = time.perf_counter()
     futures = client.map(lambda p: instance(**p), parameters, batch_size=BATCH_SIZE)
@@ -383,24 +383,24 @@ def do_experiment(instance: callable, parameters: list, db: Databases, client: C
                 tock = time.perf_counter() - tick
                 remaining_count = instance_count - i
                 s_i = tock / i
-                logging.info(f'Count: {i}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
+                logger.info(f'Count: {i}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
                              f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
-                logging.info(result)
+                logger.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
         db.push_batch()
     db.final_push()
     total_time = time.perf_counter() - tick
-    logging.info(f"Performed experiment in {total_time:0.4f} seconds")
+    logger.info(f"Performed experiment in {total_time:0.4f} seconds")
     if instance_count > 0:
-        logging.info(f"Count: {instance_count}, Seconds/Instance: {(total_time / instance_count):0.4f}")
+        logger.info(f"Count: {instance_count}, Seconds/Instance: {(total_time / instance_count):0.4f}")
 
 
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   remote: Engine = None,
                   credentials: service_account.credentials = None, project_id: str = None):
 
-    logging.info(f'{client}')
+    logger.info(f'{client}')
     # Read the DB level parameters.
     table_name = experiment['table_name']
     db = Databases(table_name, remote, credentials, project_id)
