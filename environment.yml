@@ -1,3 +1,5 @@
+name:
+  - EMS
 channels:
   - conda-forge
   - defaults
@@ -7,12 +9,9 @@ dependencies:
   - pandas
   - cvxpy
   - google-auth
-  - pandas-gbq>=0.19.2
+  - sqlalchemy
   - dask
   - coiled
-  - sqlalchemy
-  - pg8000
-  - cloud-sql-python-connector
   - pip
   - pip:
     - git+https://github.com/adonoho/EMS.git
