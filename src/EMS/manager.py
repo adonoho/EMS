@@ -15,7 +15,6 @@ from datetime import datetime, timezone, timedelta
 from math import floor
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from pandas import DataFrame
 from sqlalchemy import create_engine
@@ -25,13 +24,13 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from pg8000.dbapi import Connection
 from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
-from dask import delayed
 from dask.distributed import Client, as_completed
 import pandas_gbq.exceptions
 
 BATCH_SIZE = 4096
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -66,7 +65,7 @@ class Databases:
         self.results = []
         # Store locally for durability.
         with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi', index=False)
+            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
