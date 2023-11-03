@@ -360,9 +360,6 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
     df = db.read_params(parameters)
     if df is not None and len(df.index) > 0:
         parameters = dedup_experiment(df, parameters)
-        base_index = len(df.index)
-    else:
-        base_index = 0
     df = None  # Free up the DataFrame.
     random.shuffle(parameters)
     instance_count = len(parameters)
