@@ -29,7 +29,6 @@ import pandas_gbq.exceptions
 
 BATCH_SIZE = 4096
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def _now() -> datetime:
@@ -61,7 +60,8 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
-        logger.info(f'_push_to_database(): Length: {len(self.results)}\n{df}')
+        logger.warning(f'_push_to_database(): Number of DataFrames: {len(self.results)}; ' +
+                       f'Length of DataFrames: {sum(len(result) for result in self.results)}\n{df}')
         self.results = []
         # Store locally for durability.
         with self.local.connect() as ldb:
@@ -111,15 +111,14 @@ class Databases:
 
     def push_batch(self):
         now = _now()
-        logger.info(f'push_batch(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        logger.info(f'batch_result(): Length results: {len(self.results)}; Length of DataFrames: {sum(len(df) for df in self.results)}')
         if sum(len(df) for df in self.results) >= 8 * BATCH_SIZE:  # If the batch write is already large, push it.
+            logger.warning(f'batch_result(): Early Push: Length of DataFrames: {sum(len(df) for df in self.results)}')
             self.push_batch()
 
     def read_table(self) -> DataFrame:
@@ -205,7 +204,7 @@ def active_remote_engine() -> (Engine, MetaData):
         metadata.reflect(remote)  # Causes a DB query.
         return remote, metadata
     except SQLAlchemyError as e:
-        logger.debug("%s", e)
+        logger.error("%s", e)
         remote.dispose()
     return None, None
 
