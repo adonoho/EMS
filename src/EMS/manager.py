@@ -118,7 +118,7 @@ class Databases:
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        if sum(len(df) for df in self.results) >= 8 * BATCH_SIZE:  # If the batch write is already large, push it.
+        if sum(len(df) for df in self.results) >= 4 * BATCH_SIZE:  # If the batch write is already large, push it.
             logger.warning(f'batch_result(): Early Push: Length of DataFrames: {sum(len(df) for df in self.results)}')
             self.push_batch()
 
