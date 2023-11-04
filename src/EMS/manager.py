@@ -60,6 +60,7 @@ class Databases:
 
     def _push_to_database(self):
         df = pd.concat(self.results)
+        df.reset_index(drop=True, inplace=True)
         logger.warning(f'_push_to_database(): Number of DataFrames: {len(self.results)}; ' +
                        f'Length of DataFrames: {sum(len(result) for result in self.results)}\n{df}')
         self.results = []
