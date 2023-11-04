@@ -13,4 +13,4 @@ dependencies:
   - coiled
   - pip
   - pip:
-    - git+https://github.com/adonoho/EMS.git@debug-DB-disconnect
+    - git+https://github.com/adonoho/EMS.git
