@@ -153,19 +153,19 @@ class Databases:
                 pass
             elif self.credentials is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             elif self.project_id is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             else:
                 try:
-                    df = pd.read_sql_query(f'SELECT {keys} FROM {self.table_name}', self.local)
+                    df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.local)
                 except (ValueError, OperationalError) as e:
                     logger.error(f'{e}')
                     df = None
