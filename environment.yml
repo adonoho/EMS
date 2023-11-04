@@ -1,5 +1,4 @@
-name:
-  - EMS
+name: EMS
 channels:
   - conda-forge
   - defaults
