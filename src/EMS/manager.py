@@ -27,7 +27,8 @@ from google.oauth2 import service_account
 from dask.distributed import Client, as_completed
 import pandas_gbq.exceptions
 
-BATCH_SIZE = 4096
+BATCH_SIZE = 200  # Reduced value for Stats285 HW5.
+# BATCH_SIZE = 4096
 logger = logging.getLogger(__name__)
 
 
