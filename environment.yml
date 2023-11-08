@@ -8,7 +8,6 @@ dependencies:
   - pandas
   - cvxpy
   - google-auth
-  - sqlalchemy
   - dask
   - coiled
   - pip
