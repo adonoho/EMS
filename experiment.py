@@ -1,197 +1,115 @@
 #!/usr/bin/env python3
 
-import cvxpy as cp
+import time
 import numpy as np
-from numpy.random import Generator
-from cvxpy.atoms import normNuc, multiply, norm
 from pandas import DataFrame
-from scipy import stats as st
-from sklearn.utils.extmath import randomized_svd
 
-from EMS.manager import active_remote_engine, do_on_cluster, unroll_experiment
 from dask.distributed import Client, LocalCluster
+from dask_jobqueue import SLURMCluster
+from EMS.manager import do_on_cluster, get_gbq_credentials
 import logging
 
 logging.basicConfig(level=logging.INFO)
 
 
-def seed(m: int, n: int, snr: float, p: float, mc: int) -> int:
-    return round(1 + m * 1000 + n * 1000 + round(snr * 1000) + round(p * 1000) + mc * 100000)
+# Function that generates data with noise; will use again in later homeworks
+def generate_data(nrow: int, ncol: int, seed: int = 0) -> tuple:
+
+    # Set seed
+    rng = np.random.default_rng(1 + seed * 10000)  # Ensure the seed is non-zero and spans a large range of values.
+
+    # Create length-n vector u with element equal to (-1)^i/sqrt(n)
+    u = np.array([(-1)**i/np.sqrt(nrow) for i in range(nrow)])
+    v = np.array([(-1)**(i+1)/np.sqrt(ncol) for i in range(ncol)])
+
+    # Generate signal
+    signal = 3 * np.outer(u,v)
+
+    # noise matrix of normal(0,1)
+    noise = rng.normal(0,1,(nrow,ncol))/np.sqrt(nrow*ncol)
+
+    # observations matrix
+    X = signal + noise
+
+    return X, u, v, signal  # return data
 
 
-def _df(c: list, l: list) -> DataFrame:
-    d = dict(zip(c, l))
-    return DataFrame(data=d, index=[0])
+def experiment(*, nrow: int, ncol: int, seed: int) -> DataFrame:
+    tick = time.perf_counter()
+
+    X, u_true, v_true, signal_true = generate_data(nrow, ncol, seed=seed)
+
+    # Analyze the data using SVD
+    U, S, Vh = np.linalg.svd(X)
+
+    # Using first singular vector of U and V to estimate signal
+    u_est = U[:,0]
+    v_est = Vh[0,:]
+
+    # Calculate estimate of signal
+    signal_est = S[0] * np.outer(u_est,v_est)
+
+    # Calculate alignment between u_est and u_true
+    u_align = np.inner(u_est,u_true)
+
+    # Calculate alignment between v_est and v_true
+    v_align = np.inner(v_est,v_true)
+
+    # Calculate distance between signal_est and signal_true
+    signal_error = np.linalg.norm(signal_est-signal_true)/np.sqrt(nrow*ncol)
+
+    # Save u_est, v_est, u_true, v_true in a CSV file with an index column
+    d = {'nrow': nrow, 'ncol': ncol, 'seed': seed, "v_alignment": v_align}
+    d.update({f've{i:0>3}': ve for i, ve in enumerate(v_est)})
+    df = DataFrame(data=d, index=[0])
+
+    # Print runtime
+    logging.info(f"Seed: {seed}; {time.perf_counter() - tick} seconds.")
+    return df
 
 
-def df_experiment(m: int, n: int, snr: float, p: float, mc: int, t: float, cos_l: float, cos_r: float, sv0: float, sv1: float) -> DataFrame:
-    c = ['m', 'n', 'snr', 'p', 'mc', 't', 'cosL', 'cosR', 'sv0', 'sv1']
-    d = [m, n, snr, p, mc, t, cos_l, cos_r, sv0, sv1]
-    return _df(c, d)
+def build_params(size: int = 1, su_id: str = 'su_ID') -> dict:
 
-
-def suggested_t(observed, n):
-    return np.sqrt(np.sum(observed) / n)
-
-
-def make_data(m: int, n: int, p: float, rng: Generator) -> tuple:
-    u = rng.normal(size=m)
-    v = rng.normal(size=n)
-    u /= np.linalg.norm(u)
-    v /= np.linalg.norm(v)
-    M = np.outer(u, v)
-    noise = rng.normal(0, 1 / np.sqrt(m), (m, n))
-    observes = st.bernoulli.rvs(p, size=(m, n), random_state=rng)
-
-    return u, v, M, noise, observes
-
-
-# problem setup
-def nuc_norm_problem(Y, observed, t) -> tuple:
-    X = cp.Variable(Y.shape)
-    objective = cp.Minimize(normNuc(X))
-    Z = multiply(X - Y, observed)
-    constraints = [Z == 0] if t == 0. else [norm(Z, "fro") <= t]
-
-    prob = cp.Problem(objective, constraints)
-
-    prob.solve()
-
-    return X, prob
-
-
-# measurements
-def vec_cos(v: np.array, vhat: np.array):
-    return np.abs(np.inner(v, vhat))
-
-
-def take_measurements(Mhat, u, v):
-    uhatm, svv, vhatmh = np.linalg.svd(Mhat, full_matrices=False)
-    cosL = vec_cos(u, uhatm[:, 0])
-    cosR = vec_cos(v, vhatmh[0, :])
-
-    return cosL, cosR, svv[0], svv[1]
-
-
-def do_matrix_completion(*, m: int, n: int, snr: float, p: float, mc: int, tmethod='0') -> DataFrame:
-    rng = np.random.default_rng(seed=seed(m, n, snr, p, mc))
-
-    u, v, M, noise, obs = make_data(m, n, p, rng)
-    t = 0. if tmethod == '0' else suggested_t(observed=obs, n=n)
-    Y = snr * M + noise
-    X, _ = nuc_norm_problem(Y=Y, observed=obs, t=t)
-    Mhat = X.value
-
-    cos_l, cos_r, sv0, sv1 = take_measurements(Mhat, u, v)
-
-    return df_experiment(m, n, snr, p, mc, t, cos_l, cos_r, sv0, sv1)
-
-
-def test_experiment() -> dict:
-    # exp = dict(table_name='test',
-    #            base_index=0,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                'n': [10],
-    #                'snr': [1.0],
-    #                'p': [0.0],
-    #                'mc': [0]
-    #            }])
-    # exp = dict(table_name='test',
-    #            base_index=0,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                'n': [round(p) for p in np.linspace(10, 100, 10)],
-    #                'snr': [round(p, 0) for p in np.linspace(1, 10, 10)],
-    #                'p': [round(p, 1) for p in np.linspace(0, 1, 11)],
-    #                'mc': list(range(5))
-    #            }])
-    # exp = dict(table_name='mc:0001',
-    #            base_index=0,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                'n': [round(p) for p in np.linspace(10, 1000, 41)],
-    #                'snr': [round(p, 3) for p in np.linspace(1, 20, 39)],
-    #                'p': [round(p, 3) for p in np.linspace(0., 1., 41)],
-    #                'mc': list(range(20))
-    #            }])
-    # exp = dict(table_name='mc-0002',
-    #            base_index=0,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                'n': [round(p) for p in np.linspace(10, 500, 21)],
-    #                'snr': [round(p, 3) for p in np.linspace(1, 20, 39)],
-    #                'p': [round(p, 3) for p in np.linspace(0., 1., 41)],
-    #                'mc': list(range(20))
-    #            }])
-    # exp = dict(table_name='mc-0003',
-    #            base_index=0,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                # 'n': [round(p) for p in np.linspace(10, 500, 21)],
-    #                'n': [500],
-    #                'snr': [round(p, 3) for p in np.linspace(1, 20, 20)],
-    #                'p': [round(p, 3) for p in np.linspace(0.05, 1., 20)],
-    #                'mc': [20]
-    #            }])
-    # exp = dict(table_name='mc-0003',
-    #            base_index=400,
-    #            db_url='sqlite:///data/MatrixCompletion.db3',
-    #            multi_res=[{
-    #                'n': [500],
-    #                'snr': [round(p, 3) for p in np.linspace(1, 20, 20)],
-    #                'p': [1.],
-    #                'mc': [20]
-    #            },{
-    #                'n': [500],
-    #                'snr': [round(p, 3) for p in np.linspace(1, 20, 20)],
-    #                'p': [2./3.],
-    #                'mc': [20]
-    #            }])
-    # mr = exp['multi_res']
-    # for snr in np.linspace(3., 6., 31):
-    #     for x in np.linspace(1.5, 4.0, 26):
-    #         p = (x / snr) ** 2
-    #         if p <= 1.0:
-    #             d = {
-    #                 'n': [500],
-    #                 'snr': [snr],
-    #                 'p': [p],
-    #                 'mc': [20]
-    #             }
-    #             mr.append(d)
-    exp = dict(table_name='mc-0004',
-               base_index=0,
-               db_url='sqlite:///data/MatrixCompletion.db3',
-               multi_res=[{
-                   'm': [500],
-                   'n': [500],
-                   'snr': [round(p, 3) for p in np.linspace(1, 20, 20)],
-                   'p': [round(p, 3) for p in np.linspace(0.05, 1., 20)],
-                   'mc': [20]
-               }])
+    match size:
+        case 1:
+            exp = dict(table_name=f'stats285_{su_id}_hw5_{size}_blocks',
+                        params=[{
+                            'nrow': [1000],
+                            'ncol': [1000],
+                            'seed': [285]
+                        }])
+        case _:
+            exp = dict(table_name=f'stats285_{su_id}_hw5_{size}_blocks',
+                        params=[{
+                            'nrow': [1000],
+                            'ncol': [1000],
+                            'seed': list(range(size))
+                        }])
     return exp
 
 
-def do_local_experiment():
-    exp = test_experiment()
-    with LocalCluster(dashboard_address='localhost:8787') as cluster:
+def do_cluster_experiment(size: int = 1, su_id: str = 'su_ID', credentials=None):
+    exp = build_params(size=size, su_id=su_id)
+    with SLURMCluster(cores=8, memory='4GiB', processes=1, walltime='00:15:00') as cluster:
+        cluster.scale(8)
+        logging.info(cluster.job_script())  # Log a copy of the sbatch script.
         with Client(cluster) as client:
-            do_on_cluster(exp, do_matrix_completion, client)
+            do_on_cluster(exp, experiment, client, credentials=credentials)
+        cluster.scale(0)
 
 
-def do_test():
-    exp = test_experiment()
-    print(exp)
-    # params = unroll_experiment(exp)
-    # for p in params:
-    #     df = do_matrix_completion(**p)
-    #     print(df)
-    pass
-    df = do_matrix_completion(m=12, n=8, snr=20., p=2./3., mc=20)
-    print(df)
+def do_local_experiment(size: int = 1, su_id: str = 'su_ID', credentials=None):
+    exp = build_params(size=size, su_id=su_id)
+    with LocalCluster() as cluster:
+        with Client(cluster) as client:
+            do_on_cluster(exp, experiment, client, credentials=credentials)
 
 
 if __name__ == "__main__":
-    do_local_experiment()
-    # do_test()
+    # experiment(nrow=1000, ncol=1000, seed=285)
+    do_local_experiment(size=1, su_id='su_ID_1')
+    # do_local_experiment(size=1000, su_id='su_ID_slurm_large_node')
+    # do_local_experiment(size=1000, su_id='su_ID_slurm_large_node_gbq_2',
+    #                     credentials=get_gbq_credentials('stanford-stats-285-donoho-0dc233389eb9.json'))
+    # do_cluster_experiment(size=1000, su_id='su_ID_slurm_cluster_2',
+    #                       credentials=get_gbq_credentials('stanford-stats-285-donoho-0dc233389eb9.json'))

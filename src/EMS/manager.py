@@ -29,6 +29,7 @@ import pandas_gbq.exceptions
 
 BATCH_SIZE = 200  # Reduced value for Stats285 HW5.
 # BATCH_SIZE = 4096
+NUM_CELLS = 200 * 1000  # 200 rows x 1,000 columns. Slightly less than the values used on FarmShare
 logger = logging.getLogger(__name__)
 
 
@@ -93,10 +94,16 @@ class Databases:
                 logger.error("%s", e)
         df = None
 
+    def _df_size_check(self, df: DataFrame) -> bool:
+        _, n_col = df.shape
+        t_row = sum(len(result) for result in self.results)
+        return t_row * n_col > NUM_CELLS
+
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        # if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -111,16 +118,20 @@ class Databases:
         self.credentials = None
         self.project_id = None
 
+    def _first_result(self) -> DataFrame | None:
+        return self.results[0] if len(self.results) > 0 else None
+
     def push_batch(self):
         now = _now()
-        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
-            self._push_to_database()
-            self.last_save = now
+        if df := self._first_result():
+            if self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=60.0):
+                self._push_to_database()
+                self.last_save = now
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        n_row, n_col = result.shape
-        if sum(len(df) for df in self.results) >= BATCH_SIZE:  # If the batch write is already large, push it.
+        # if sum(len(df) for df in self.results) >= BATCH_SIZE:  # If the batch write is already large, push it.
+        if self._df_size_check(result):  # If the batch write is already large, push it.
             logger.warning(f'batch_result(): Early Push: Length of DataFrames: {sum(len(df) for df in self.results)}')
             self.push_batch()
 
@@ -383,7 +394,7 @@ def do_experiment(instance: callable, parameters: list, db: Databases, client: C
                 remaining_count = instance_count - i
                 s_i = tock / i
                 logger.info(f'Count: {i}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
-                             f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
+                            f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
                 logger.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.

@@ -4,12 +4,15 @@ channels:
   - defaults
 dependencies:
   - blas[build=mkl]
-  - python=3.10
+  - python=3.11
   - pandas
-  - cvxpy
   - google-auth
   - dask
-  - coiled
+  - dask-jobqueue
+#  - coiled
   - pip
   - pip:
-    - git+https://github.com/adonoho/EMS.git
+    - git+https://github.com/adonoho/EMS.git@Check-both-dimensions-of-DataFrame-to-flush-batch-
+variables:
+  MKL_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
