@@ -423,6 +423,8 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     if len(parameters) > 0:
         random.shuffle(parameters)
         do_experiment(instance, parameters, db, client)
+    else:
+        logger.warning('Database is complete.')
     client.shutdown()
 
 
