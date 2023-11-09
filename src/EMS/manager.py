@@ -123,10 +123,10 @@ class Databases:
 
     def push_batch(self):
         now = _now()
-        if df := self._first_result():
-            if self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=60.0):
-                self._push_to_database()
-                self.last_save = now
+        df = self._first_result()
+        if df is not None and (self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=60.0)):
+            self._push_to_database()
+            self.last_save = now
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
