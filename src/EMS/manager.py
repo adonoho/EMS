@@ -4,7 +4,6 @@
     Donoho Lab Experiment Management System
 """
 
-
 import copy
 import json
 import logging
@@ -17,17 +16,18 @@ from pathlib import Path
 
 import pandas as pd
 from pandas import DataFrame
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.schema import MetaData
-from sqlalchemy.exc import SQLAlchemyError, OperationalError
-from pg8000.dbapi import Connection
+import pandas_gbq.exceptions
+from dask.distributed import Client, as_completed
 from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
-from dask.distributed import Client, as_completed
-import pandas_gbq.exceptions
+from pg8000.dbapi import Connection
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+from sqlalchemy.schema import MetaData
 
 BATCH_SIZE = 4096
+NUM_CELLS = 200 * 1000  # 200 rows x 1,000 columns. Slightly less than the values used on FarmShare
 logger = logging.getLogger(__name__)
 
 
@@ -92,10 +92,15 @@ class Databases:
                 logger.error("%s", e)
         df = None
 
+    def _df_size_check(self, df: DataFrame) -> bool:
+        _, n_col = df.shape
+        t_row = sum(len(result) for result in self.results)
+        return t_row * n_col > NUM_CELLS
+
     def push(self, result: DataFrame):
         now = _now()
         self.results.append(result)
-        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=60.0):
             self._push_to_database()
             self.last_save = now
 
@@ -110,16 +115,21 @@ class Databases:
         self.credentials = None
         self.project_id = None
 
+    def _first_result(self) -> DataFrame | None:
+        return self.results[0] if len(self.results) > 0 else None
+
     def push_batch(self):
         now = _now()
-        if sum(len(df) for df in self.results) >= BATCH_SIZE or (now - self.last_save) > timedelta(seconds=60.0):
+        df = self._first_result()
+        if df is not None and (self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=60.0)):
             self._push_to_database()
             self.last_save = now
 
     def batch_result(self, result: DataFrame):
         self.results.append(result)
-        if sum(len(df) for df in self.results) >= 4 * BATCH_SIZE:  # If the batch write is already large, push it.
-            logger.warning(f'batch_result(): Early Push: Length of DataFrames: {sum(len(df) for df in self.results)}')
+        if self._df_size_check(result):  # If the batch write is already large, push it.
+            logger.warning(f'batch_result(): Early Push: Number of Columns: {result.shape[1]}; ' +
+                           f'Length of DataFrames: {sum(len(df) for df in self.results)}')
             self.push_batch()
 
     def read_table(self) -> DataFrame:
@@ -153,7 +163,8 @@ class Databases:
                 pass
             elif self.credentials is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
+                                     credentials=self.credentials)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
@@ -347,7 +358,6 @@ def dedup_experiment(df: DataFrame, params: list) -> list:
 def do_test_experiment(experiment: dict, instance: callable, client: Client,
                        remote: Engine = None,
                        credentials: service_account.credentials = None, project_id: str = None):
-
     # Read the DB level parameters.
     table_name = experiment['table_name']
     db = Databases(table_name, remote, credentials, project_id)
@@ -381,7 +391,7 @@ def do_experiment(instance: callable, parameters: list, db: Databases, client: C
                 remaining_count = instance_count - i
                 s_i = tock / i
                 logger.info(f'Count: {i}; Time: {round(tock)}; Seconds/Instance: {s_i:0.4f}; ' +
-                             f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
+                            f'Remaining (s): {round(remaining_count * s_i)}; Remaining Count: {remaining_count}')
                 logger.info(result)
             db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
@@ -396,7 +406,6 @@ def do_experiment(instance: callable, parameters: list, db: Databases, client: C
 def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   remote: Engine = None,
                   credentials: service_account.credentials = None, project_id: str = None):
-
     logger.info(f'{client}')
     # Read the DB level parameters.
     table_name = experiment['table_name']
@@ -414,6 +423,8 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
     if len(parameters) > 0:
         random.shuffle(parameters)
         do_experiment(instance, parameters, db, client)
+    else:
+        logger.warning('Database is complete.')
     client.shutdown()
 
 
