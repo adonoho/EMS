@@ -12,7 +12,7 @@ dependencies:
 #  - coiled
   - pip
   - pip:
-    - git+https://github.com/adonoho/EMS.git@Check-both-dimensions-of-DataFrame-to-flush-batch-
+    - git+https://github.com/adonoho/EMS.git
 variables:
   MKL_NUM_THREADS: '1'
   OPENBLAS_NUM_THREADS: '1'
