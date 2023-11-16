@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "EMS"
-version = "0.0.15"
+version = "0.0.16"
 authors = [
     {name = "Andrew W. Donoho", email = "github@store.ddg.com"}
 ]
@@ -16,7 +16,7 @@ dependencies = [
     "pandas",
     "google-auth",
     "pandas-gbq >=0.19.2",
-    "sqlalchemy >=1.4.36",
+    "sqlalchemy",
     "cloud-sql-python-connector",
     "pg8000",
     "dask"

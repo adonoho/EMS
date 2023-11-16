@@ -45,18 +45,25 @@ def _touch_db_url(db_url: str):
 
 class Databases(object):
 
-    def __init__(self, table_name: str,
+    def __init__(self, table_name: str = None,
                  remote: Engine = None,  # SQLAlchemy based systems
                  credentials: service_account.credentials = None, project_id: str = None):  # Google Big Query.
         self.results = []
         self.last_save = _now()
-        self.table_name = table_name
-        db_url = 'sqlite:///data/EMS.db3'
-        _touch_db_url(db_url)
-        self.local = create_engine(db_url, echo=False)
-        self.remote = remote
-        self.credentials = credentials
-        self.project_id = project_id
+        if table_name is not None:
+            self.table_name = table_name
+            db_url = 'sqlite:///data/EMS.db3'
+            _touch_db_url(db_url)
+            self.local = create_engine(db_url, echo=False)
+            self.remote = remote
+            self.credentials = credentials
+            self.project_id = project_id
+        else:
+            self.table_name = None
+            self.local = None
+            self.remote = None
+            self.credentials = None
+            self.project_id = None
 
     def _push_to_database(self):
         df = pd.concat(self.results)
@@ -65,8 +72,12 @@ class Databases(object):
                        f'Length of DataFrames: {sum(len(result) for result in self.results)}\n{df}')
         self.results = []
         # Store locally for durability.
-        with self.local.connect() as ldb:
-            df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
+        if self.local is not None:
+            try:
+                with self.local.connect() as ldb:
+                    df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
+            except SQLAlchemyError as e:
+                logger.error("%s", e)
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
@@ -107,7 +118,8 @@ class Databases(object):
     def final_push(self):
         if len(self.results) > 0:
             self._push_to_database()
-        self.local.dispose()
+        if self.local is not None:
+            self.local.dispose()
         self.local = None
         if self.remote is not None:
             self.remote.dispose()
@@ -135,7 +147,11 @@ class Databases(object):
     def read_table(self) -> DataFrame:
         df = None
         if self.remote is not None:
-            pass
+            try:
+                df = pd.read_sql_query(f'SELECT * FROM {self.table_name}', self.remote)
+            except (ValueError, OperationalError) as e:
+                logger.error(f'{e}')
+                df = None
         elif self.credentials is not None:
             try:
                 df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
@@ -148,7 +164,7 @@ class Databases(object):
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logger.error(f'{e}')
                 df = None
-        else:
+        elif self.local is not None:
             try:
                 df = pd.read_sql_table(self.table_name, self.local)
             except ValueError:
@@ -160,7 +176,11 @@ class Databases(object):
         if len(params) > 0:
             keys = ','.join(sorted(params[0].keys()))
             if self.remote is not None:
-                pass
+                try:
+                    df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.remote)
+                except (ValueError, OperationalError) as e:
+                    logger.error(f'{e}')
+                    df = None
             elif self.credentials is not None:
                 try:
                     df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
@@ -174,7 +194,7 @@ class Databases(object):
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
-            else:
+            elif self.local is not None:
                 try:
                     df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.local)
                 except (ValueError, OperationalError) as e:
