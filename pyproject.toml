@@ -16,7 +16,7 @@ dependencies = [
     "pandas",
     "google-auth",
     "pandas-gbq >=0.19.2",
-    "sqlalchemy >2.0.0",
+    "sqlalchemy >=1.4.36",
     "cloud-sql-python-connector",
     "pg8000",
     "dask"
