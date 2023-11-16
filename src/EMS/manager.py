@@ -43,7 +43,7 @@ def _touch_db_url(db_url: str):
         p.touch(exist_ok=True)
 
 
-class Databases:
+class Databases(object):
 
     def __init__(self, table_name: str,
                  remote: Engine = None,  # SQLAlchemy based systems
