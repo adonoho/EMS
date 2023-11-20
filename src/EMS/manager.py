@@ -11,7 +11,7 @@ import os
 import random
 import time
 from datetime import datetime, timezone, timedelta
-from math import floor
+from math import ceil, floor
 from pathlib import Path
 
 import pandas as pd
@@ -43,6 +43,11 @@ def _touch_db_url(db_url: str):
         p.touch(exist_ok=True)
 
 
+def _write_size_check(df: DataFrame) -> bool:
+    t_row, n_col = df.shape
+    return t_row * n_col > NUM_CELLS
+
+
 class Databases(object):
 
     def __init__(self, table_name: str = None,
@@ -71,24 +76,25 @@ class Databases(object):
         logger.warning(f'_push_to_database(): Number of DataFrames: {len(self.results)}; ' +
                        f'Length of DataFrames: {sum(len(result) for result in self.results)}\n{df}')
         self.results = []
+        chunk_size = ceil(len(df) / 2) + 1 if _write_size_check(df) else len(df) + 1
         # Store locally for durability.
         if self.local is not None:
             try:
                 with self.local.connect() as ldb:
-                    df.to_sql(self.table_name, ldb, if_exists='append', method='multi')
+                    df.to_sql(self.table_name, ldb, if_exists='append', method='multi', chunksize=chunk_size)
             except SQLAlchemyError as e:
                 logger.error("%s", e)
         # Store remotely for flexibility.
         if self.remote is not None:
             try:
                 with self.remote.connect() as rdb:
-                    df.to_sql(self.table_name, rdb, if_exists='append', method='multi')
+                    df.to_sql(self.table_name, rdb, if_exists='append', method='multi', chunksize=chunk_size)
             except SQLAlchemyError as e:
                 logger.error("%s", e)
         if self.credentials is not None:
             try:
                 df.to_gbq(f'EMS.{self.table_name}',
-                          if_exists='append',
+                          if_exists='append', chunksize=chunk_size,
                           progress_bar=False,
                           credentials=self.credentials)
             except pandas_gbq.exceptions.GenericGBQException as e:
@@ -96,7 +102,7 @@ class Databases(object):
         elif self.project_id is not None:
             try:
                 df.to_gbq(f'EMS.{self.table_name}',
-                          if_exists='append',
+                          if_exists='append', chunksize=chunk_size,
                           progress_bar=False,
                           project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
