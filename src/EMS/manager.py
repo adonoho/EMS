@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 from pandas import DataFrame
 import pandas_gbq.exceptions
-from dask.distributed import Client, as_completed
+from dask.distributed import Client, worker_client, as_completed
 from google.cloud.sql.connector import Connector
 from google.oauth2 import service_account
 from pg8000.dbapi import Connection
@@ -152,62 +152,64 @@ class Databases(object):
 
     def read_table(self) -> DataFrame:
         df = None
-        if self.remote is not None:
-            try:
-                df = pd.read_sql_query(f'SELECT * FROM {self.table_name}', self.remote)
-            except (ValueError, OperationalError) as e:
-                logger.error(f'{e}')
-                df = None
-        elif self.credentials is not None:
-            try:
-                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
-            except pandas_gbq.exceptions.GenericGBQException as e:
-                logger.error(f'{e}')
-                df = None
-        elif self.project_id is not None:
-            try:
-                df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
-            except pandas_gbq.exceptions.GenericGBQException as e:
-                logger.error(f'{e}')
-                df = None
-        elif self.local is not None:
-            try:
-                df = pd.read_sql_table(self.table_name, self.local)
-            except ValueError:
-                df = None
-        return df
-
-    def read_params(self, params: list) -> DataFrame:
-        df = None
-        if len(params) > 0:
-            keys = ','.join(sorted(params[0].keys()))
+        if self.table_name is not None:
             if self.remote is not None:
                 try:
-                    df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.remote)
+                    df = pd.read_sql_query(f'SELECT * FROM {self.table_name}', self.remote)
                 except (ValueError, OperationalError) as e:
                     logger.error(f'{e}')
                     df = None
             elif self.credentials is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
-                                     credentials=self.credentials)
+                    df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             elif self.project_id is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                    df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             elif self.local is not None:
                 try:
-                    df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.local)
-                except (ValueError, OperationalError) as e:
-                    logger.error(f'{e}')
+                    df = pd.read_sql_table(self.table_name, self.local)
+                except ValueError:
                     df = None
-        else:
-            df = self.read_table()
+        return df
+
+    def read_params(self, params: list) -> DataFrame:
+        df = None
+        if self.table_name is not None:
+            if len(params) > 0:
+                keys = ','.join(sorted(params[0].keys()))
+                if self.remote is not None:
+                    try:
+                        df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.remote)
+                    except (ValueError, OperationalError) as e:
+                        logger.error(f'{e}')
+                        df = None
+                elif self.credentials is not None:
+                    try:
+                        df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
+                                         credentials=self.credentials)
+                    except pandas_gbq.exceptions.GenericGBQException as e:
+                        logger.error(f'{e}')
+                        df = None
+                elif self.project_id is not None:
+                    try:
+                        df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                    except pandas_gbq.exceptions.GenericGBQException as e:
+                        logger.error(f'{e}')
+                        df = None
+                elif self.local is not None:
+                    try:
+                        df = pd.read_sql_query(f'SELECT DISTINCT {keys} FROM {self.table_name}', self.local)
+                    except (ValueError, OperationalError) as e:
+                        logger.error(f'{e}')
+                        df = None
+            else:
+                df = self.read_table()
         return df
 
 
@@ -252,6 +254,67 @@ def get_gbq_credentials(cred_name: str = 'hs-deep-lab-donoho-3d5cf4ffa2f7.json')
     expanded_path = os.path.expanduser(path)
     credentials = service_account.Credentials.from_service_account_file(expanded_path)
     return credentials
+
+
+class EvalOnCluster(object):
+
+    def __init__(self, client: Client,
+                 table_name: str, credentials: service_account.credentials = None):
+        self.db = Databases(table_name, None, credentials, None)
+        self.client = client
+        self.credentials = credentials
+        self.computations = None  # Iterable returning (future, df).
+        self.keys = None
+
+    def eval_params(self, instance: callable, params: dict) -> tuple:
+        """
+        Evaluate the instance with the params and return a tuple of param values that could become a key in a dict.
+        :param instance: The `callable` to be invoked on the cluster.
+        :param params: The `kwargs` to be passed to the `instance`
+        :return: A tuple of param values suitable to become a key in a dict.
+        """
+
+        if self.keys is None:
+            self.keys = sorted(params.keys())
+        futures = self.client.map(lambda p: instance(**p), [params])  # To isolate kwargs, use a lambda function.
+        if self.computations is None:
+            self.computations = as_completed(futures, with_results=True)
+        else:
+            self.computations.update(futures)
+        return tuple(params[k] for k in self.keys)
+
+    def result(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
+        future, result = next(self.computations)
+        self.db.push(result)
+        future.release()  # EP function; release the data; will not be reused.
+        values = result[self.keys].to_numpy()
+        yield result, tuple(v for v in values[0])
+
+    def final_push(self):
+        self.db.final_push()
+        self.client.shutdown()
+
+
+def on_worker() -> bool:
+    import distributed.worker
+
+    try:
+        _ = distributed.worker.get_worker()
+        return True
+    except ValueError:
+        return False
+
+
+def get_dataset(key: str) -> DataFrame:
+    if on_worker():
+        with worker_client() as wc:
+            df = wc.get_dataset(name=key, default=None)
+    else:
+        wc = Client.current(allow_global=True)
+        df = wc.get_dataset(name=key, default=None)
+    if df is not None:
+        return df.copy(deep=True)  # Defend against mutating common data.
+    return None
 
 
 def unroll_parameters(parameters: dict) -> list:
