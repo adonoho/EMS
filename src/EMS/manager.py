@@ -448,7 +448,7 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
                        remote: Engine = None,
                        credentials: service_account.credentials = None, project_id: str = None):
     # Read the DB level parameters.
-    table_name = experiment['table_name']
+    table_name = experiment.get('table_name', None)
     db = Databases(table_name, remote, credentials, project_id)
 
     # Save the experiment domain.
@@ -497,7 +497,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
                   credentials: service_account.credentials = None, project_id: str = None):
     logger.info(f'{client}')
     # Read the DB level parameters.
-    table_name = experiment['table_name']
+    table_name = experiment.get('table_name', None)
     db = Databases(table_name, remote, credentials, project_id)
 
     # Save the experiment domain.
