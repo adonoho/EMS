@@ -259,7 +259,7 @@ def get_gbq_credentials(cred_name: str = 'hs-deep-lab-donoho-3d5cf4ffa2f7.json')
 class EvalOnCluster(object):
 
     def __init__(self, client: Client,
-                 table_name: str, credentials: service_account.credentials = None):
+                 table_name: str = None, credentials: service_account.credentials = None):
         self.db = Databases(table_name, None, credentials, None)
         self.client = client
         self.credentials = credentials
@@ -410,9 +410,10 @@ def read_json(fn: str) -> dict:
 
 
 def record_experiment(experiment: dict):
-    table_name = experiment['table_name']
-    now_ts = timestamp()
-    write_json(experiment, table_name + f'-{now_ts}.json')
+    table_name = experiment.get('table_name', None)
+    if table_name is not None:
+        now_ts = timestamp()
+        write_json(experiment, table_name + f'-{now_ts}.json')
 
 
 def unroll_experiment(experiment: dict) -> list:
