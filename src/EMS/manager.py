@@ -312,9 +312,10 @@ def get_dataset(key: str) -> DataFrame:
     else:
         wc = Client.current(allow_global=True)
         df = wc.get_dataset(name=key, default=None)
-    if df is not None:
-        return df.copy(deep=True)  # Defend against mutating common data.
-    return None
+    return df
+    # if df is not None:
+    #     return df.copy(deep=True)  # Defend against mutating common data.
+    # return None
 
 
 def unroll_parameters(parameters: dict) -> list:
