@@ -283,6 +283,26 @@ class EvalOnCluster(object):
             self.computations.update(futures)
         return tuple(params[k] for k in self.keys)
 
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        future, result = self.computations.__next__()
+        self.db.push(result)
+        future.release()  # EP function; release the data; will not be reused.
+        values = result[self.keys].to_numpy()
+        return result, tuple(v for v in values[0])
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        future, result = await self.computations.__anext__()
+        self.db.push(result)
+        future.release()  # EP function; release the data; will not be reused.
+        values = result[self.keys].to_numpy()
+        return result, tuple(v for v in values[0])
+
     def result(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
         future, result = next(self.computations)
         self.db.push(result)
