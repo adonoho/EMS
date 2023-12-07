@@ -290,6 +290,13 @@ class EvalOnCluster(object):
         values = result[self.keys].to_numpy()
         yield result, tuple(v for v in values[0])
 
+    async def result_async(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
+        future, result = await next(self.computations)
+        self.db.push(result)
+        future.release()  # EP function; release the data; will not be reused.
+        values = result[self.keys].to_numpy()
+        yield result, tuple(v for v in values[0])
+
     def final_push(self):
         self.db.final_push()
         self.client.shutdown()
