@@ -266,6 +266,11 @@ class EvalOnCluster(object):
         self.computations = None  # Iterable returning (future, df).
         self.keys = None
 
+    def key_from_params(self, params: dict) -> tuple:
+        if self.keys is None:
+            self.keys = sorted(params.keys())
+        return tuple(params[k] for k in self.keys)
+
     def eval_params(self, instance: callable, params: dict) -> tuple:
         """
         Evaluate the instance with the params and return a tuple of param values that could become a key in a dict.
@@ -274,14 +279,12 @@ class EvalOnCluster(object):
         :return: A tuple of param values suitable to become a key in a dict.
         """
 
-        if self.keys is None:
-            self.keys = sorted(params.keys())
         futures = self.client.map(lambda p: instance(**p), [params])  # To isolate kwargs, use a lambda function.
         if self.computations is None:
             self.computations = as_completed(futures, with_results=True)
         else:
             self.computations.update(futures)
-        return tuple(params[k] for k in self.keys)
+        return self.key_from_params(params)
 
     def __iter__(self):
         return self
@@ -310,13 +313,13 @@ class EvalOnCluster(object):
         values = result[self.keys].to_numpy()
         yield result, tuple(v for v in values[0])
 
-    async def result_async(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
-        future, result = await self.computations.__anext__()
-        # future, result = await next(self.computations)
-        self.db.push(result)
-        future.release()  # EP function; release the data; will not be reused.
-        values = result[self.keys].to_numpy()
-        yield result, tuple(v for v in values[0])
+    # async def result_async(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
+    #     future, result = await self.computations.__anext__()
+    #     # future, result = await next(self.computations)
+    #     self.db.push(result)
+    #     future.release()  # EP function; release the data; will not be reused.
+    #     values = result[self.keys].to_numpy()
+    #     yield result, tuple(v for v in values[0])
 
     def final_push(self):
         self.db.final_push()
