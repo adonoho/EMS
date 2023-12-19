@@ -313,14 +313,6 @@ class EvalOnCluster(object):
         values = result[self.keys].to_numpy()
         yield result, tuple(v for v in values[0])
 
-    # async def result_async(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
-    #     future, result = await self.computations.__anext__()
-    #     # future, result = await next(self.computations)
-    #     self.db.push(result)
-    #     future.release()  # EP function; release the data; will not be reused.
-    #     values = result[self.keys].to_numpy()
-    #     yield result, tuple(v for v in values[0])
-
     def final_push(self):
         self.db.final_push()
         self.client.shutdown()
@@ -344,9 +336,6 @@ def get_dataset(key: str) -> DataFrame:
         wc = Client.current(allow_global=True)
         df = wc.get_dataset(name=key, default=None)
     return df
-    # if df is not None:
-    #     return df.copy(deep=True)  # Defend against mutating common data.
-    # return None
 
 
 def unroll_parameters(parameters: dict) -> list:
