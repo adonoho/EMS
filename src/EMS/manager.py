@@ -487,6 +487,20 @@ def do_test_experiment(experiment: dict, instance: callable, client: Client,
     logger.info(f'Number of Instances to calculate: {instance_count}')
 
 
+def dedup_experiment_from_db(experiment: dict, remote: Engine = None,
+                             credentials: service_account.credentials = None) -> list:
+    # Read the DB level parameters.
+    table_name = experiment.get('table_name', None)
+    db = Databases(table_name, remote, credentials)
+
+    # Prepare parameters.
+    parameters = unroll_experiment(experiment)
+    df = db.read_params(parameters)
+    if df is not None and len(df.index) > 0:
+        parameters = dedup_experiment(df, parameters)
+    return parameters  # Return the parameters not yet calculated.
+
+
 def do_experiment(instance: callable, parameters: list, db: Databases, client: Client):
     instance_count = len(parameters)
     i = 0
