@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 from pandas import DataFrame
+import pandas_gbq
 import pandas_gbq.exceptions
 from dask.distributed import Client, worker_client, as_completed
 from google.cloud.sql.connector import Connector
@@ -93,7 +94,7 @@ class Databases(object):
                 logger.error("%s", e)
         if self.credentials is not None:
             try:
-                df.to_gbq(f'EMS.{self.table_name}',
+                pandas_gbq.to_gbq(df, f'EMS.{self.table_name}',
                           if_exists='append', chunksize=chunk_size,
                           progress_bar=False,
                           credentials=self.credentials)
@@ -101,7 +102,7 @@ class Databases(object):
                 logger.error("%s", e)
         elif self.project_id is not None:
             try:
-                df.to_gbq(f'EMS.{self.table_name}',
+                pandas_gbq.to_gbq(df, f'EMS.{self.table_name}',
                           if_exists='append', chunksize=chunk_size,
                           progress_bar=False,
                           project_id=self.project_id)
@@ -161,13 +162,13 @@ class Databases(object):
                     df = None
             elif self.credentials is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             elif self.project_id is not None:
                 try:
-                    df = pd.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
@@ -191,14 +192,14 @@ class Databases(object):
                         df = None
                 elif self.credentials is not None:
                     try:
-                        df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
+                        df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
                                          credentials=self.credentials)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
                 elif self.project_id is not None:
                     try:
-                        df = pd.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                        df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
