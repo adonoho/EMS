@@ -199,7 +199,8 @@ class Databases(object):
                         df = None
                 elif self.project_id is not None:
                     try:
-                        df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                        df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
+                                                 project_id=self.project_id)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
