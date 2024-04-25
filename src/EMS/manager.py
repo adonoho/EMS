@@ -27,6 +27,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.schema import MetaData
 
+DB_URL = 'sqlite:///data/EMS.db3'
 BATCH_SIZE = 4096
 NUM_CELLS = 200 * 1000  # 200 rows x 1,000 columns. Slightly less than the values used on FarmShare
 logger = logging.getLogger(__name__)
@@ -58,9 +59,8 @@ class Databases(object):
         self.last_save = _now()
         if table_name is not None:
             self.table_name = table_name
-            db_url = 'sqlite:///data/EMS.db3'
-            _touch_db_url(db_url)
-            self.local = create_engine(db_url, echo=False)
+            _touch_db_url(DB_URL)
+            self.local = create_engine(DB_URL, echo=False)
             self.remote = remote
             self.credentials = credentials
             self.project_id = project_id
@@ -95,17 +95,17 @@ class Databases(object):
         if self.credentials is not None:
             try:
                 pandas_gbq.to_gbq(df, f'EMS.{self.table_name}',
-                          if_exists='append', chunksize=chunk_size,
-                          progress_bar=False,
-                          credentials=self.credentials)
+                                  if_exists='append', chunksize=chunk_size,
+                                  progress_bar=False,
+                                  credentials=self.credentials)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logger.error("%s", e)
         elif self.project_id is not None:
             try:
                 pandas_gbq.to_gbq(df, f'EMS.{self.table_name}',
-                          if_exists='append', chunksize=chunk_size,
-                          progress_bar=False,
-                          project_id=self.project_id)
+                                  if_exists='append', chunksize=chunk_size,
+                                  progress_bar=False,
+                                  project_id=self.project_id)
             except pandas_gbq.exceptions.GenericGBQException as e:
                 logger.error("%s", e)
         df = None
@@ -193,7 +193,7 @@ class Databases(object):
                 elif self.credentials is not None:
                     try:
                         df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
-                                         credentials=self.credentials)
+                                                 credentials=self.credentials)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
@@ -555,8 +555,7 @@ def do_on_cluster(experiment: dict, instance: callable, client: Client,
 
 
 if __name__ == '__main__':
-    db_url = 'sqlite:///data/EMS.db3'
-    _touch_db_url(db_url)
+    _touch_db_url(DB_URL)
     # d = {
     #     'm': [50],
     #     'n': [1275, 2550, 3825],
