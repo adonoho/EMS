@@ -162,13 +162,15 @@ class Databases(object):
                     df = None
             elif self.credentials is not None:
                 try:
-                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', credentials=self.credentials)
+                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`',
+                                             credentials=self.credentials, progress_bar_type=None)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
             elif self.project_id is not None:
                 try:
-                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`', project_id=self.project_id)
+                    df = pandas_gbq.read_gbq(f'SELECT * FROM `EMS.{self.table_name}`',
+                                             project_id=self.project_id, progress_bar_type=None)
                 except pandas_gbq.exceptions.GenericGBQException as e:
                     logger.error(f'{e}')
                     df = None
@@ -193,14 +195,14 @@ class Databases(object):
                 elif self.credentials is not None:
                     try:
                         df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
-                                                 credentials=self.credentials)
+                                                 credentials=self.credentials, progress_bar_type=None)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
                 elif self.project_id is not None:
                     try:
                         df = pandas_gbq.read_gbq(f'SELECT DISTINCT {keys} FROM `EMS.{self.table_name}`',
-                                                 project_id=self.project_id)
+                                                 project_id=self.project_id, progress_bar_type=None)
                     except pandas_gbq.exceptions.GenericGBQException as e:
                         logger.error(f'{e}')
                         df = None
