@@ -229,3 +229,4 @@ fabric.properties
 # Project specific
 src/EMS/data/EMS.db3
 *.db3
+*.txt
