@@ -290,6 +290,21 @@ class EvalOnCluster(object):
             self.computations.update(futures)
         return self.key_from_params(params)
 
+    def eval_params_list(self, instance: callable, params: [dict]) -> [tuple]:
+        """
+        Evaluate the instance with the params and return a tuple of param values that could become a key in a dict.
+        :param instance: The `callable` to be invoked on the cluster.
+        :param params: The `kwargs` to be passed to the `instance`
+        :return: A tuple of param values suitable to become a key in a dict.
+        """
+
+        futures = self.client.map(lambda p: instance(**p), params)  # To isolate kwargs, use a lambda function.
+        if self.computations is None:
+            self.computations = as_completed(futures, with_results=True)
+        else:
+            self.computations.update(futures)
+        return [self.key_from_params(p) for p in params]
+
     def __iter__(self):
         return self
 
@@ -309,6 +324,14 @@ class EvalOnCluster(object):
         future.release()  # EP function; release the data; will not be reused.
         values = result[self.keys].to_numpy()
         return result, tuple(v for v in values[0])
+
+    def batches(self) -> list:
+        batch = self.computations.batches()
+        for future, result in batch:
+            self.db.batch_result(result)
+            future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
+        self.db.push_batch()
+        return [(result, tuple(v for v in result[self.keys].to_numpy()[0])) for _, result in batch]
 
     def result(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
         future, result = next(self.computations)
