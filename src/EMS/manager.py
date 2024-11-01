@@ -326,7 +326,8 @@ class EvalOnCluster(object):
         return result, tuple(v for v in values[0])
 
     def batches(self) -> list:
-        batch = self.computations.batches()
+        # batch = self.computations.batches()
+        batch = self.computations.next_batch(block=False)
         for future, result in batch:
             self.db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
