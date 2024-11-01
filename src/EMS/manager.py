@@ -325,8 +325,7 @@ class EvalOnCluster(object):
         values = result[self.keys].to_numpy()
         return result, tuple(v for v in values[0])
 
-    def batches(self) -> list:
-        # batch = self.computations.batches()
+    def next_batch(self) -> list:
         batch = self.computations.next_batch(block=False)
         for future, result in batch:
             self.db.batch_result(result)
