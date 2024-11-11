@@ -115,10 +115,10 @@ class Databases(object):
         t_row = sum(len(result) for result in self.results)
         return t_row * n_col > NUM_CELLS
 
-    def push(self, result: DataFrame):
+    def push(self, result: DataFrame, period=60.0):
         now = _now()
         self.results.append(result)
-        if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=60.0):
+        if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=period):
             self._push_to_database()
             self.last_save = now
 
@@ -137,10 +137,10 @@ class Databases(object):
     def _first_result(self) -> DataFrame | None:
         return self.results[0] if len(self.results) > 0 else None
 
-    def push_batch(self):
+    def push_batch(self, period=60.0):
         now = _now()
         df = self._first_result()
-        if df is not None and (self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=60.0)):
+        if df is not None and (self._df_size_check(df) or (now - self.last_save) > timedelta(seconds=period)):
             self._push_to_database()
             self.last_save = now
 
