@@ -325,12 +325,12 @@ class EvalOnCluster(object):
         values = result[self.keys].to_numpy()
         return result, tuple(v for v in values[0])
 
-    def next_batch(self) -> list:
+    def next_batch(self, period=60.0) -> list:
         batch = self.computations.next_batch(block=False)
         for future, result in batch:
             self.db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
-        self.db.push_batch()
+        self.db.push_batch(period=period)
         return [(result, tuple(v for v in result[self.keys].to_numpy()[0])) for _, result in batch]
 
     def result(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
