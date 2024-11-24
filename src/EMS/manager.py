@@ -54,13 +54,17 @@ class Databases(object):
 
     def __init__(self, table_name: str = None,
                  remote: Engine = None,  # SQLAlchemy based systems
-                 credentials: service_account.credentials = None, project_id: str = None):  # Google Big Query.
+                 credentials: service_account.credentials = None, project_id: str = None,  # Google Big Query.
+                 local_db: bool = True):
         self.results = []
         self.last_save = _now()
         if table_name is not None:
             self.table_name = table_name
-            _touch_db_url(DB_URL)
-            self.local = create_engine(DB_URL, echo=False)
+            if local_db:
+                _touch_db_url(DB_URL)
+                self.local = create_engine(DB_URL, echo=False)
+            else:
+                self.local = None
             self.remote = remote
             self.credentials = credentials
             self.project_id = project_id
@@ -263,8 +267,9 @@ def get_gbq_credentials(cred_name: str = 'hs-deep-lab-donoho-3d5cf4ffa2f7.json')
 class EvalOnCluster(object):
 
     def __init__(self, client: Client,
-                 table_name: str = None, credentials: service_account.credentials = None):
-        self.db = Databases(table_name, None, credentials, None)
+                 table_name: str = None, credentials: service_account.credentials = None,
+                 local_db: bool = True):
+        self.db = Databases(table_name, None, credentials, None, local_db=local_db)
         self.client = client
         self.credentials = credentials
         self.computations = None  # Iterable returning (future, df).
