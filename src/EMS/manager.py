@@ -338,7 +338,7 @@ class EvalOnCluster(object):
             self.db.batch_result(result)
             future.release()  # As these are Embarrassingly Parallel tasks, clean up memory.
         self.db.push_batch(period=period)
-        return [(result, tuple(v for v in result[self.keys].to_numpy()[0])) for _, result in batch]
+        return [(result, tuple(v for v in result[self.keys].to_numpy()[0])) for _, result in batch if result is not None]
 
     def result(self) -> (DataFrame, tuple):  # Return a DataFrame and a key.
         future, result = next(self.computations)
