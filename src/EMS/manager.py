@@ -123,9 +123,9 @@ class Databases(object):
         now = _now()
         if result:
             self.results.append(result)
-        if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=period):
-            self._push_to_database()
-            self.last_save = now
+            if self._df_size_check(result) or (now - self.last_save) > timedelta(seconds=period):
+                self._push_to_database()
+                self.last_save = now
 
     def final_push(self):
         if len(self.results) > 0:
@@ -152,10 +152,10 @@ class Databases(object):
     def batch_result(self, result: DataFrame):
         if result:
             self.results.append(result)
-        if self._df_size_check(result):  # If the batch write is already large, push it.
-            logger.warning(f'batch_result(): Early Push: Number of Columns: {result.shape[1]}; ' +
-                           f'Length of DataFrames: {sum(len(df) for df in self.results)}')
-            self.push_batch()
+            if self._df_size_check(result):  # If the batch write is already large, push it.
+                logger.warning(f'batch_result(): Early Push: Number of Columns: {result.shape[1]}; ' +
+                               f'Length of DataFrames: {sum(len(df) for df in self.results)}')
+                self.push_batch()
 
     def read_table(self) -> DataFrame:
         df = None
